@@ -12,12 +12,73 @@ const VALID: ReviewState[] = ["pending", "accepted", "edited", "rejected", "unkn
 // LEAD ONLY. actor always comes from the signed session, never the body.
 const handler = guard(["lead"], async (req: NextRequest, user) => {
   const { claimId, action, note, newText } = await req.json();
-  if (!claimId || !VALID.includes(action)) {
+  if (!claimId || (action !== "resolve" && !VALID.includes(action))) {
     return Response.json({ error: "claimId and valid action required" }, { status: 400 });
   }
   const db = getDB();
   const claim = db.claims.find((c) => c.id === claimId);
   if (!claim) return Response.json({ error: "claim not found" }, { status: 404 });
+
+  // Conflict resolution (review S2-8): the reviewer picks the winning side;
+  // the other side(s) become rejected with the reason, and both stop being
+  // "conflicting" so the publish checklist no longer warns about them.
+  if (action === "resolve") {
+    if (claim.status !== "conflicting") {
+      return Response.json({ error: "claim is not conflicting" }, { status: 400 });
+    }
+    const winner = claim;
+    const losers = (winner.conflictingWith ?? [])
+      .map((id) => db.claims.find((c) => c.id === id))
+      .filter((c): c is NonNullable<typeof c> => !!c && c.id !== winner.id);
+    const quotesOk =
+      winner.evidence.length > 0 && winner.evidence.every((e) => e.quoteVerified);
+    const beforeW = { text: winner.text, status: winner.status, reviewState: winner.reviewState };
+    winner.status = winner.supported === "yes" && quotesOk ? "verified" : "inferred";
+    winner.statusReason =
+      `Conflict resolved by ${user.name}: this version stands.` +
+      (note ? ` ${note}` : "") +
+      (winner.stale ? " ⏳ Staleness flag: source mentions an old last-activity date." : "");
+    winner.conflictingWith = [];
+    winner.reviewState = "accepted";
+    winner.reviewNote = note;
+    db.reviews.push({
+      id: randomId("rev"),
+      claimId: winner.id,
+      action: "resolve",
+      actor: user.name,
+      at: new Date().toISOString(),
+      note: note ?? "kept as the winning version",
+      before: beforeW,
+      after: { text: winner.text, status: winner.status, reviewState: winner.reviewState },
+    });
+    for (const loser of losers) {
+      const beforeL = { text: loser.text, status: loser.status, reviewState: loser.reviewState };
+      loser.status = "inferred";
+      loser.statusReason =
+        `Conflict resolved by ${user.name}: rejected in favour of another version of this statement.`;
+      loser.conflictingWith = [];
+      loser.reviewState = "rejected";
+      loser.reviewNote = note;
+      db.reviews.push({
+        id: randomId("rev"),
+        claimId: loser.id,
+        action: "resolve",
+        actor: user.name,
+        at: new Date().toISOString(),
+        note: `rejected in favour of ${winner.id}`,
+        before: beforeL,
+        after: { text: loser.text, status: loser.status, reviewState: loser.reviewState },
+      });
+    }
+    appendAudit(
+      db,
+      user.name,
+      "review:resolve",
+      `Conflict resolved: kept ${winner.id}, rejected ${losers.length} other side(s)`
+    );
+    saveDB(db);
+    return Response.json({ ok: true, winner, losers });
+  }
 
   const before = {
     text: claim.text,

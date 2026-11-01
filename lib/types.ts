@@ -76,7 +76,7 @@ export interface Claim {
 export interface ReviewAction {
   id: string;
   claimId: string;
-  action: ReviewState;
+  action: ReviewState | "resolve"; // "resolve" = conflict-resolution pair of entries
   actor: string; // always the session user, never from the request body
   at: string;
   note?: string;
@@ -99,6 +99,9 @@ export interface HandoverVersion {
   publishedBy: string;
   claims: Claim[]; // immutable snapshot
   note?: string;
+  // SHA-256 of the snapshot claims (review S2-8): shown in the UI and
+  // recomputable by anyone with the file to prove the snapshot was not edited
+  hash?: string;
 }
 
 export interface DB {

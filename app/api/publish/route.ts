@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { createHash } from "crypto";
 import { guard } from "@/lib/session";
 import { getDB, saveDB, appendAudit } from "@/lib/store";
 import { randomId } from "@/lib/id";
@@ -33,11 +34,25 @@ const handler = guard(["lead"], async (req: NextRequest, user) => {
     );
   }
 
-  // publish checklist (review S2-8): unresolved conflicts warn the publisher
+  // publish checklist (review S2-8): unresolved conflicts and an
+  // all-unknown handover both warn the publisher explicitly
   const unresolvedConflicts = publishable.filter((c) => c.status === "conflicting").length;
   const unconfirmed = publishable.filter(
     (c) => c.status === "inferred" && c.reviewState !== "accepted" && c.reviewState !== "edited"
   ).length;
+  const unknownOnly = reviewed.length > 0 && reviewed.every((c) => c.reviewState === "unknown");
+  const warnings = [
+    unknownOnly
+      ? 'Every reviewed claim is "unknown" — this handover confirms nothing has been verified.'
+      : null,
+    unresolvedConflicts > 0 ? `${unresolvedConflicts} unresolved conflict(s) included.` : null,
+    unconfirmed > 0 ? `${unconfirmed} unconfirmed inference(s) included.` : null,
+  ].filter(Boolean) as string[];
+
+  const snapshot = structuredClone(publishable);
+  // SHA-256 over the snapshot so anyone can recompute it and prove the
+  // published version was not edited on disk (review S2-8)
+  const hash = createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
 
   const version = (db.versions.at(-1)?.version ?? 0) + 1;
   db.versions.push({
@@ -45,13 +60,13 @@ const handler = guard(["lead"], async (req: NextRequest, user) => {
     version,
     publishedAt: new Date().toISOString(),
     publishedBy: user.name,
-    claims: structuredClone(publishable),
+    claims: snapshot,
+    hash,
     note:
       note ??
       ([
         heldBack.length > 0 ? `${heldBack.length} unreviewed held back` : null,
-        unresolvedConflicts > 0 ? `${unresolvedConflicts} unresolved conflict(s)` : null,
-        unconfirmed > 0 ? `${unconfirmed} unconfirmed inference(s)` : null,
+        ...warnings,
       ]
         .filter(Boolean)
         .join(" · ") || "all claims reviewed"),
@@ -65,6 +80,9 @@ const handler = guard(["lead"], async (req: NextRequest, user) => {
   saveDB(db);
   return Response.json({
     version,
+    hash,
+    warnings,
+    noRealClaims: reviewed.filter((c) => c.reviewState === "unknown").length,
     publishedCount: publishable.length,
     heldBackCount: heldBack.length,
     unresolvedConflicts,

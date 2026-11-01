@@ -9,7 +9,10 @@ interface Src {
 }
 interface Claim {
   id: string; type: string; text: string; status: string;
-  evidence: { sourceId: string; quote: string; quoteVerified: boolean }[];
+  evidence: {
+    sourceId: string; quote: string; quoteVerified: boolean;
+    charStart?: number; charEnd?: number;
+  }[];
 }
 
 // Evidence inspector: shows the raw source with every cited quote highlighted,
@@ -22,8 +25,15 @@ export default function SourcesPage() {
   const load = useCallback(async () => {
     const { data: s } = await api<any>("/api/sources?withContent=1");
     setSources(s.sources ?? []);
-    const { data: st } = await api<any>("/api/state");
-    setClaims(st.claims ?? []);
+    const { status, data: st } = await api<any>("/api/state");
+    if (status === 403) {
+      // non-lead: /api/state is lead-only (S1-1) — highlights come from the
+      // published, role-filtered view instead
+      const { data: vw } = await api<any>("/api/view");
+      setClaims(vw.claims ?? []);
+    } else {
+      setClaims(st.claims ?? []);
+    }
     if ((s.sources ?? []).length > 0 && !selected) setSelected(s.sources[0].id);
   }, [selected]);
   useEffect(() => { load(); }, [load]);
@@ -94,6 +104,9 @@ export default function SourcesPage() {
                       <span className={`badge ${e.claim.status}`}>{e.claim.status}</span>
                       <span className="claim-type">{e.claim.type}</span>
                       {!e.quoteVerified && <span className="badge conflicting">quote unverified</span>}
+                      {!quoteLocated(src.content, e) && (
+                        <span className="badge conflicting">location not found</span>
+                      )}
                     </div>
                     <div className="claim-text">{e.claim.text}</div>
                   </div>
@@ -107,14 +120,45 @@ export default function SourcesPage() {
   );
 }
 
+// Offsets recorded at verification time are authoritative (review S2-6);
+// fall back to a plain search for legacy/redacted text.
+function quoteLocated(
+  content: string,
+  e: { quote: string; charStart?: number; charEnd?: number }
+) {
+  if (
+    typeof e.charStart === "number" &&
+    typeof e.charEnd === "number" &&
+    content.slice(e.charStart, e.charEnd) === e.quote
+  ) {
+    return true;
+  }
+  return content.includes(e.quote);
+}
+
 // Split content so every cited quote renders as a highlighted <mark>.
-function renderHighlighted(content: string, cites: { quote: string; claim: Claim }[]) {
+function renderHighlighted(content: string, cites: { quote: string; claim: Claim; charStart?: number; charEnd?: number }[]) {
   const points: { start: number; end: number; claim: Claim }[] = [];
   for (const c of cites) {
-    const idx = content.indexOf(c.quote);
-    if (idx === -1) continue;
-    if (points.some((p) => idx >= p.start && idx < p.end)) continue; // overlapping highlight
-    points.push({ start: idx, end: idx + c.quote.length, claim: c.claim });
+    let start = -1;
+    let end = -1;
+    if (
+      typeof c.charStart === "number" &&
+      typeof c.charEnd === "number" &&
+      content.slice(c.charStart, c.charEnd) === c.quote
+    ) {
+      start = c.charStart;
+      end = c.charEnd;
+    } else {
+      const idx = content.indexOf(c.quote);
+      if (idx !== -1) {
+        start = idx;
+        end = idx + c.quote.length;
+      }
+    }
+    if (start === -1) continue; // "location not found" shows next to the claim
+    if (points.some((p) => start < p.end && end > p.start)) continue; // overlapping highlight
+    points.push({ start, end, claim: c.claim });
   }
   points.sort((a, b) => a.start - b.start);
   const out: React.ReactNode[] = [];

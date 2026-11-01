@@ -81,6 +81,18 @@ const SPECIFIC_PATTERNS: RegExp[] = [
   /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s@]+@[^\s]+/gi,
   // Authorization headers
   /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
+  // Phone numbers: national 5+5 (e.g. "98765 43210") and intl forms with a
+  // leading +CC. Digit groups must be 4–6 so ISO dates (2026-03-15) and
+  // timestamps never match.
+  /\b(?:\+?\d{1,3}[\s.-]?)?\(?\d{4,6}\)?[\s.-]\d{4,6}\b/g,
+];
+
+// Phone numbers (review S2-5): Indian mobiles (5+5, optional +91) and
+// international +CC numbers. Narrow on purpose — no bare digit runs, so dates
+// and ids are never redacted.
+const PHONE_PATTERNS: RegExp[] = [
+  /\b(?:\+91[\s-]?)?[6-9]\d{4}[\s-]\d{5}\b/g,
+  /\+\d{1,3}[\s-]?\(?\d{1,4}\)?(?:[\s-]\d{1,4}){1,3}\b/g,
 ];
 
 // Generic: label, explicit separator (":" "=" or "is"), then a value of 8+
@@ -93,8 +105,11 @@ export function redactSecrets(text: string): string {
   for (const re of SPECIFIC_PATTERNS) {
     out = out.replace(re, "[REDACTED-CREDENTIAL]");
   }
+  for (const re of PHONE_PATTERNS) {
+    out = out.replace(re, "[REDACTED-PHONE]");
+  }
   out = out.replace(GENERIC_SECRET, "$1=[REDACTED-CREDENTIAL]");
-  // emails (demo exception: example.com addresses are fake and kept)
+  // emails (documented demo exception: example.com addresses are fake and kept)
   out = out.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, (m) =>
     m.includes("example.com") ? m : "[REDACTED-EMAIL]"
   );

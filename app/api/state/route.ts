@@ -64,6 +64,7 @@ const handler = guard(["lead"], async () => {
       publishedBy: v.publishedBy,
       note: v.note,
       claimCount: v.claims.length,
+      hash: v.hash,
     })),
     audit: db.audit,
   });

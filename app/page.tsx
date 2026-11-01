@@ -14,6 +14,8 @@ interface State {
   quotesFound: { found: number; total: number };
   supportCounts: Record<string, number>;
   audit: { id: string; at: string; actor: string; action: string; detail: string }[];
+  isLead?: boolean;
+  viewNote?: string;
 }
 
 export default function Dashboard() {
@@ -23,8 +25,38 @@ export default function Dashboard() {
   const [msg, setMsg] = useState<{ kind: "ok" | "err" | "warn"; text: string } | null>(null);
 
   const load = useCallback(async () => {
-    const { data } = await api<State>("/api/state");
-    setState(data);
+    const { status, data } = await api<State>("/api/state");
+    if (status === 403) {
+      // Non-lead: reviewer state is off-limits (S1-1) — build a
+      // role-appropriate dashboard from the endpoints every role may call,
+      // instead of dereferencing the 403 body (which crashed the page).
+      const [sv, vw] = await Promise.all([api<any>("/api/sources"), api<any>("/api/view")]);
+      const sources: Src[] = sv.data.sources ?? [];
+      const claims: any[] = vw.data.claims ?? [];
+      const byStatus: Record<string, number> = { verified: 0, inferred: 0, conflicting: 0, missing: 0 };
+      for (const c of claims) if (byStatus[c.status] !== undefined) byStatus[c.status]++;
+      const withEv = claims.filter((c) => (c.evidence ?? []).length > 0);
+      setState({
+        projectName: vw.data.published ? vw.data.projectName : "Handover",
+        extractedAt: vw.data.publishedAt ?? null,
+        sources,
+        byStatus,
+        byReview: { pending: 0, accepted: 0, edited: 0, rejected: 0, unknown: 0 },
+        pendingUnreviewed: 0,
+        quotesFound: {
+          found: withEv.filter((c) => c.evidence.every((e: any) => e.quoteVerified)).length,
+          total: withEv.length,
+        },
+        supportCounts: {},
+        audit: [],
+        isLead: false,
+        viewNote: vw.data.published
+          ? `Published handover v${vw.data.version} — ${vw.data.excludedCount} claim(s) excluded for your role. Import, extraction and the audit log are lead-only.`
+          : "No published handover yet — a reviewer must publish before role views exist. Import, extraction and the audit log on this page are lead-only.",
+      });
+      return;
+    }
+    setState({ ...data, isLead: true });
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -62,6 +94,7 @@ export default function Dashboard() {
   }
 
   if (!state) return <p className="muted">Loading…</p>;
+  const isLead = state.isLead !== false;
   const total = state.byStatus.verified + state.byStatus.inferred + state.byStatus.conflicting + state.byStatus.missing;
 
   return (
@@ -77,7 +110,7 @@ export default function Dashboard() {
         <div className="stat inferred"><div className="num">{state.byStatus.inferred}</div><div className="lbl">Inferred</div></div>
         <div className="stat conflicting"><div className="num">{state.byStatus.conflicting}</div><div className="lbl">Conflicting</div></div>
         <div className="stat missing"><div className="num">{state.byStatus.missing}</div><div className="lbl">Missing</div></div>
-        <div className="stat"><div className="num">{state.pendingUnreviewed}</div><div className="lbl">Awaiting review</div></div>
+        {isLead && <div className="stat"><div className="num">{state.pendingUnreviewed}</div><div className="lbl">Awaiting review</div></div>}
         <div className="stat">
           <div className="num" style={{ fontSize: "1.3rem" }}>
             {state.quotesFound.total > 0 ? `${state.quotesFound.found}/${state.quotesFound.total}` : "—"}
@@ -86,7 +119,12 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {msg && <div className={`notice ${msg.kind}`}>{msg.text}</div>}
+      {msg && (
+        <div className={`notice ${msg.kind}`} role={msg.kind === "err" ? "alert" : "status"}>
+          {msg.text}
+        </div>
+      )}
+      {state.viewNote && <div className="notice warn">{state.viewNote}</div>}
 
       <h2>Sources ({state.sources.length})</h2>
       {state.sources.length === 0 ? (
@@ -109,13 +147,16 @@ export default function Dashboard() {
           </table>
         </div>
       )}
-      <div className="row mt">
-        <button onClick={runExtract} disabled={busy !== null || state.sources.length === 0}>
-          {busy === "extract" ? "Extracting…" : "Run extraction pipeline"}
-        </button>
-        {state.extractedAt && <span className="muted mono">last extraction: {new Date(state.extractedAt).toLocaleString()}</span>}
-      </div>
+      {isLead && (
+        <div className="row mt">
+          <button onClick={runExtract} disabled={busy !== null || state.sources.length === 0}>
+            {busy === "extract" ? "Extracting…" : "Run extraction pipeline"}
+          </button>
+          {state.extractedAt && <span className="muted mono">last extraction: {new Date(state.extractedAt).toLocaleString()}</span>}
+        </div>
+      )}
 
+      {isLead && (
       <div className="grid grid-2 mt">
         <div>
           <h2 style={{ marginTop: 0 }}>Import a source</h2>
@@ -176,6 +217,7 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+      )}
     </>
   );
 }

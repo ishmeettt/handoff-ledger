@@ -4,6 +4,9 @@
 
 Round 2 build of the competition plan. All demonstration data is synthetic and created during the build window.
 
+Built with **Codebuff** 🤖 — the AI pair-programming agent — with human review
+of every change; commit messages carry the same disclosure.
+
 ## What it does
 
 1. **Connect** — import authorised sources (meeting notes, chat exports, task boards, docs); each source carries an access level (`public` / `internal` / `restricted`) and an explicit permission confirmation.
@@ -32,8 +35,11 @@ Two more Round 2 views make every claim checkable:
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm run selftest   # in another terminal: 50-check planted-fact + permission-leak suite
+npm run test       # 17 unit tests: redaction, quote matching, statuses, conflicts, permissions, timeline
+npm run selftest   # in another terminal: 54-check planted-fact + permission-leak suite
 ```
+
+Unit tests run in CI (GitHub Actions) on every push: typecheck + the suite above.
 
 ### Sign in
 
@@ -73,6 +79,10 @@ confirms them.
 server (heuristic extraction, no support check, local conflict verdicts) —
 restricted content is never sent to the external model.
 
+**Redaction notes:** credential-shaped strings, phone numbers and email
+addresses are masked in every response for every role. The one documented
+exception: `example.com` addresses are fake demo data and are kept as-is.
+
 ## Design
 
 A dark **HUD theme** built on the [Adminator 4](https://github.com/puikinsh/Adminator-admin-dashboard)
@@ -110,7 +120,7 @@ app/              Next.js App Router UI + API routes
 
 ## Self-test
 
-`npm run selftest` walks the entire flow against a running server and asserts the plan's success criteria: all five planted facts found and correctly labelled (with the decoy pair NOT flagged as a conflict), no claim Verified without an exact-matching quote AND a passed support check, publish blocked with zero reviews, 401 without a session on every endpoint, zero permission leaks (restricted strings absent from every junior/successor response across every endpoint), the restricted-never-leaves-server policy, session-derived audit actors, immutable versioning, and live timeline/evidence endpoints.
+`npm run selftest` walks the entire flow against a running server and asserts the plan's success criteria: all five planted facts found and correctly labelled (with the decoy pair NOT flagged as a conflict), no claim Verified without an exact-matching quote AND a passed support check, publish blocked with zero reviews, 401 without a session on every endpoint, zero permission leaks (restricted strings absent from every junior/successor response across every endpoint), the restricted-never-leaves-server policy, session-derived audit actors, immutable versioning (numbered snapshots each carrying a recomputable SHA-256 hash), conflict resolution (winner accepted, counterpart rejected), an explicit warning when a publish would confirm nothing (all-unknown handover), the prompt-injection line in the seed export producing **no** claim, and live timeline/evidence endpoints. Ground truth lives in `scripts/planted-facts.json`, shared with the Round 3 scorecard.
 
 ## Roadmap (per plan)
 

@@ -8,13 +8,15 @@ export const metadata: Metadata = {
   description: "Prevent critical knowledge from leaving with people. Every claim carries its source, its status and its permission.",
 };
 
-// Set the theme before first paint so there is no light/dark flash.
-// (dark unless the visitor prefers light or chose it before)
-const themeInit = `(function(){try{var t=localStorage.getItem('hl-theme')||(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();`;
+// Set the theme before first paint so there is no light/dark flash. The
+// server renders data-theme="dark" (the default), so the script only mutates
+// the attribute when the visitor actually wants light — no hydration mismatch
+// for the default case.
+const themeInit = `(function(){try{var t=localStorage.getItem('hl-theme')||(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" data-theme="dark">
       <head>
         {/* Fonts loaded in <head> so they fetch in parallel with the
             stylesheet (Adminator pattern) — no render-blocking CSS hop. */}

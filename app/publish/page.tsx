@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/client";
+import LeadOnly from "@/components/LeadOnly";
 
-interface Version { version: number; publishedAt: string; publishedBy: string; note: string; claimCount: number; }
+interface Version { version: number; publishedAt: string; publishedBy: string; note: string; claimCount: number; hash?: string; }
 interface State {
   versions: Version[];
   pendingUnreviewed: number;
@@ -13,11 +14,15 @@ interface State {
 
 export default function PublishPage() {
   const [state, setState] = useState<State | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: string; text: string } | null>(null);
 
   const load = useCallback(async () => {
-    const { data } = await api<State>("/api/state");
+    const { status, data } = await api<State>("/api/state");
+    // lead-only endpoint (S1-1): explain instead of crashing on the 403 body
+    if (status === 403) { setForbidden(true); return; }
+    setForbidden(false);
     setState(data);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -45,6 +50,7 @@ export default function PublishPage() {
     load();
   }
 
+  if (forbidden) return <LeadOnly page="Publish" />;
   if (!state) return <p className="muted">Loading…</p>;
 
   const publishable = state.byReview.accepted + state.byReview.edited + state.byReview.unknown + state.byStatus.missing;
@@ -86,7 +92,11 @@ export default function PublishPage() {
         )}
       </div>
 
-      {msg && <div className={`notice ${msg.kind}`}>{msg.text}</div>}
+      {msg && (
+        <div className={`notice ${msg.kind}`} role={msg.kind === "err" ? "alert" : "status"}>
+          {msg.text}
+        </div>
+      )}
 
       <h2>Version history</h2>
       {state.versions.length === 0 ? (
@@ -94,7 +104,7 @@ export default function PublishPage() {
       ) : (
         <div className="panel" style={{ padding: 0 }}>
           <table>
-            <thead><tr><th>Version</th><th>Published</th><th>By</th><th>Claims</th><th>Note</th></tr></thead>
+            <thead><tr><th>Version</th><th>Published</th><th>By</th><th>Claims</th><th>Snapshot hash</th><th>Note</th></tr></thead>
             <tbody>
               {[...state.versions].reverse().map((v) => (
                 <tr key={v.version}>
@@ -102,6 +112,9 @@ export default function PublishPage() {
                   <td className="muted">{new Date(v.publishedAt).toLocaleString()}</td>
                   <td>{v.publishedBy}</td>
                   <td className="mono">{v.claimCount}</td>
+                  <td className="mono muted" title={v.hash ?? ""}>
+                    {v.hash ? v.hash.slice(0, 12) : "—"}
+                  </td>
                   <td className="muted">{v.note}</td>
                 </tr>
               ))}

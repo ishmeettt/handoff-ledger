@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/client";
+import LeadOnly from "@/components/LeadOnly";
 
 interface Evidence {
   sourceId: string; quote: string; quoteVerified: boolean;
@@ -33,13 +34,18 @@ const SUPPORT_LABEL: Record<string, string> = {
 
 export default function ReviewBoard() {
   const [state, setState] = useState<State | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [filter, setFilter] = useState("all");
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
 
   const load = useCallback(async () => {
-    const { data } = await api<State>("/api/state");
+    const { status, data } = await api<State>("/api/state");
+    // /api/state is lead-only by design (S1-1) — explain, never dereference
+    // the 403 body (that crashed the page for successor/junior sessions).
+    if (status === 403) { setForbidden(true); return; }
+    setForbidden(false);
     setState(data);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -56,6 +62,7 @@ export default function ReviewBoard() {
     load();
   }
 
+  if (forbidden) return <LeadOnly page="Review board" />;
   if (!state) return <p className="muted">Loading…</p>;
 
   const claims = state.claims.filter(
@@ -159,6 +166,16 @@ export default function ReviewBoard() {
               <div className="reason">{c.statusReason}</div>
               {c.supportReason && <div className="reason">support check: {c.supportReason}</div>}
               {c.reviewNote && <div className="reason">reviewer note: {c.reviewNote}</div>}
+              {c.status === "conflicting" && c.reviewState === "pending" && (
+                <div className="actions">
+                  <button className="small" disabled={busy !== null} onClick={() => act(c, "resolve")}>
+                    ✓ This side is correct — resolve conflict
+                  </button>
+                  <span className="muted" style={{ alignSelf: "center", fontSize: "0.85rem" }}>
+                    The other side is rejected automatically and both actions are logged.
+                  </span>
+                </div>
+              )}
               {c.reviewState === "pending" || c.reviewState === "unknown" ? (
                 <div className="actions">
                   <button className="small" disabled={busy !== null} onClick={() => act(c, "accepted")}>Accept</button>

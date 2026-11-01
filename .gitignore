@@ -2,6 +2,7 @@ node_modules/
 .next/
 out/
 data/
+.freebuff/
 .env*.local
 *.tsbuildinfo
 next-env.d.ts

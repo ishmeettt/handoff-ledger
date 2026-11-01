@@ -15,9 +15,14 @@ function check(name, pass, detail = "") {
   console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
+// Ground truth shared with the Round 3 scorecard (review Part 4)
+import { readFileSync } from "node:fs";
+const PLANTED = JSON.parse(
+  readFileSync(new URL("./planted-facts.json", import.meta.url), "utf8")
+);
+
 // strings that exist ONLY in the restricted ops runbook
-const RESTRICTED_ONLY =
-  /sk_test_FAKE_DEMO_KEY|password manager|Gradescope integration token|Anita Rao|laptop \.env|Production DB password/i;
+const RESTRICTED_ONLY = new RegExp(PLANTED.restrictedStrings.join("|"), "i");
 
 // simple cookie-jar fetch
 async function req(path, { method = "GET", body, cookie, headers = {} } = {}) {
@@ -121,6 +126,9 @@ async function main() {
 
     // ---------- C. planted facts ----------
     const decisions = claims.filter((c) => c.type === "decision");
+    // match on the CITED QUOTE as well as the claim text: Groq may paraphrase
+    // the claim, but the source sentence is the ground truth
+    const cites = (c, re) => re.test(c.text) || (c.evidence ?? []).some((e) => re.test(e.quote ?? ""));
     const conflicts = claims.filter((c) => c.status === "conflicting");
     check("planted conflict (Postgres vs SQLite) detected", conflicts.length >= 1, `${conflicts.length} conflicting`);
     check(
@@ -130,7 +138,7 @@ async function main() {
     );
     // decoy: the grader-writes decision shares the word "grader/grades" with the
     // Postgres decision but names no different option -> must NOT be flagged
-    const decoy = decisions.find((c) => /grader service will own all writes/i.test(c.text));
+    const decoy = claims.find((c) => cites(c, /grader service will own all writes/i));
     check(
       "decoy decision (grader owns writes) NOT flagged conflicting",
       !!decoy && decoy.status !== "conflicting",
@@ -144,6 +152,19 @@ async function main() {
     check("confidential item captured (fake payment key, redacted in output)", secret.length >= 1, `${secret.length} claim(s)`);
     const dep = claims.filter((c) => c.type === "dependency" && /password/i.test(c.text));
     check("undocumented dependency found (deploy password)", dep.length >= 1, `${dep.length}`);
+
+    // prompt-injection defence (review S2-7): the planted injection line in the
+    // chat export must not steer extraction — no claim may name Mallory
+    const injectionHits = claims.filter(
+      (c) => new RegExp(PLANTED.injection.mustNotAppearInClaims, "i").test(c.text) ||
+        new RegExp(PLANTED.injection.mustNotAppearInClaims, "i").test(c.owner ?? "") ||
+        /ignore all previous/i.test(c.text)
+    );
+    check(
+      "injection line does not change owner/status (no Mallory claim)",
+      injectionHits.length === 0,
+      injectionHits.length ? injectionHits.map((c) => c.text).join("; ").slice(0, 80) : "clean"
+    );
 
     // ---------- S2-7 data-handling policy: restricted stays on this server ----------
     const srcs = (await req("/api/sources", { cookie: lead })).data.sources ?? [];
@@ -161,8 +182,8 @@ async function main() {
     // missed claims (review S2-2): "Also decided" must be extracted
     check(
       "'Also decided — grader owns all writes' IS extracted",
-      decisions.some((c) => /grader service will own all writes/i.test(c.text)),
-      "loosened decision pattern"
+      decisions.some((c) => cites(c, /grader service will own all writes/i)),
+      "loosened decision pattern (quote- or text-cited)"
     );
     // duplicates (review S2-2): normalized quote appears once
     const normKeys = claims
@@ -197,7 +218,38 @@ async function main() {
     let pub = await req("/api/publish", { method: "POST", body: {}, cookie: lead });
     check("publishing with zero reviewed claims is blocked", pub.status === 400, pub.data.error ?? "");
 
-    for (const c of claims.filter((x) => x.status !== "missing")) {
+    // unknown-only publish is allowed but loudly warned (review S2-8)
+    const unknownOnly = claims.find((x) => x.status !== "missing" && x.status !== "conflicting");
+    await req("/api/review", { method: "PATCH", body: { claimId: unknownOnly.id, action: "unknown" }, cookie: lead });
+    pub = await req("/api/publish", { method: "POST", body: {}, cookie: lead });
+    check(
+      "publish with ONLY unknown-reviewed claims warns (noRealClaims)",
+      pub.status === 200 && (pub.data.noRealClaims ?? 0) >= 1,
+      `v${pub.data.version}, noRealClaims=${pub.data.noRealClaims}`
+    );
+
+    // conflict resolution (review S2-8): winner accepted, counterpart rejected
+    const conf = claims.find((c) => c.status === "conflicting");
+    const resolved = await req("/api/review", {
+      method: "PATCH",
+      body: { claimId: conf.id, action: "resolve" },
+      cookie: lead,
+    });
+    check(
+      "resolve conflict accepts winner AND rejects counterpart",
+      resolved.status === 200 &&
+        resolved.data.winner?.reviewState === "accepted" &&
+        (resolved.data.losers ?? []).length >= 1 &&
+        resolved.data.losers.every((l) => l.reviewState === "rejected"),
+      `winner=${resolved.data.winner?.reviewState}, losers=${(resolved.data.losers ?? []).map((l) => l.reviewState).join("/")}`
+    );
+    const resolvedCounterpartId = resolved.data.losers?.[0]?.id;
+
+    // mass-accept only claims still awaiting review — never reopen a resolved pair
+    for (const c of claims.filter(
+      (x) => x.status !== "missing" && x.id !== resolvedCounterpartId &&
+        (x.reviewState === "pending" || x.reviewState === "unknown")
+    )) {
       await req("/api/review", {
         method: "PATCH",
         body: { claimId: c.id, action: "accepted" },
@@ -214,7 +266,8 @@ async function main() {
     );
 
     // edited claim -> Inferred (review S2-4)
-    const editTarget = claims.find((x) => x.status === "verified") ?? claims[0];
+    const editTarget = claims.find((x) => x.status === "verified" && x.id !== resolvedCounterpartId) ??
+      claims.find((x) => x.id !== resolvedCounterpartId) ?? claims[0];
     const edited = await req("/api/review", {
       method: "PATCH",
       body: { claimId: editTarget.id, action: "edited", newText: "Rewritten by the reviewer during self-test." },
@@ -235,7 +288,7 @@ async function main() {
 
     // ---------- F. publish + immutability ----------
     pub = await req("/api/publish", { method: "POST", body: {}, cookie: lead });
-    check("publish creates an immutable version", pub.status === 200 && pub.data.version === 1, `v${pub.data.version ?? "?"}`);
+    check("publish creates an immutable version", pub.status === 200 && pub.data.version === 2, `v${pub.data.version ?? "?"} (v1 was the unknown-only warning publish)`);
 
     // ---------- G. role leak scans across ALL endpoints ----------
     for (const [who, cookie] of [["successor", sam], ["junior", lee]]) {
@@ -297,14 +350,19 @@ async function main() {
       `${tl.events?.length} events`
     );
 
-    // ---------- I. version immutability ----------
-    const v1Count = (await req("/api/state", { cookie: lead })).data.versions?.[0]?.claimCount;
+    // ---------- I. version immutability + snapshot hash (review S2-8) ----------
+    const prevCount = (await req("/api/state", { cookie: lead })).data.versions?.[0]?.claimCount;
     const pub2 = await req("/api/publish", { method: "POST", body: {}, cookie: lead });
     const versions = (await req("/api/state", { cookie: lead })).data.versions;
     check(
-      "second publish -> v2, v1 snapshot unchanged",
-      pub2.data.version === 2 && versions[0].claimCount === v1Count,
+      "next publish -> new version, previous snapshot unchanged",
+      pub2.data.version === 3 && versions[0].claimCount === prevCount,
       `now v${pub2.data.version}`
+    );
+    check(
+      "every published version carries a SHA-256 snapshot hash",
+      versions.every((v) => typeof v.hash === "string" && /^[0-9a-f]{64}$/.test(v.hash)),
+      versions.map((v) => `v${v.version}:${(v.hash ?? "").slice(0, 8)}`).join(" ")
     );
   }
 
