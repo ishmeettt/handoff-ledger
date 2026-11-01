@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { api } from "@/lib/client";
 
 interface Src {
   id: string; name: string; kind: string; accessLevel: string;
-  author: string; importedAt: string; chunks: number;
+  author: string; importedAt: string; chunks: number; preview: string;
 }
 interface State {
   projectName: string; extractedAt: string | null; sources: Src[];
   byStatus: Record<string, number>; byReview: Record<string, number>;
-  citationValidity: { valid: number; total: number };
+  pendingUnreviewed: number;
+  quotesFound: { found: number; total: number };
+  supportCounts: Record<string, number>;
   audit: { id: string; at: string; actor: string; action: string; detail: string }[];
 }
 
@@ -20,8 +23,8 @@ export default function Dashboard() {
   const [msg, setMsg] = useState<{ kind: "ok" | "err" | "warn"; text: string } | null>(null);
 
   const load = useCallback(async () => {
-    const r = await fetch("/api/state");
-    setState(await r.json());
+    const { data } = await api<State>("/api/state");
+    setState(data);
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -29,32 +32,31 @@ export default function Dashboard() {
     e.preventDefault();
     setBusy("import");
     setMsg(null);
-    const r = await fetch("/api/sources", {
+    const { ok, data } = await api<any>("/api/sources", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
-    const data = await r.json();
     setBusy(null);
-    if (!r.ok) return setMsg({ kind: "err", text: data.error ?? "Import failed" });
+    if (!ok) return setMsg({ kind: "err", text: data.error ?? "Import failed" });
     setMsg({ kind: "ok", text: `Imported with ${data.chunks} chunks. Run extraction to turn it into claims.` });
     setForm({ ...form, name: "", content: "", confirmedPermission: false });
     load();
   }
 
   async function runExtract() {
-    if (state && state.byReview && Object.values(state.byReview).reduce((a, b) => a + b, 0) > state.byReview.pending) {
+    if (state && state.pendingUnreviewed > 0) {
       if (!confirm("Re-running extraction replaces all claims and clears review decisions on them. Continue?")) return;
     }
     setBusy("extract");
     setMsg(null);
-    const r = await fetch("/api/extract", { method: "POST" });
-    const data = await r.json();
+    const { ok, data } = await api<any>("/api/extract", { method: "POST" });
     setBusy(null);
-    if (!r.ok) return setMsg({ kind: "err", text: data.error ?? "Extraction failed" });
+    if (!ok) return setMsg({ kind: "err", text: data.error ?? "Extraction failed" });
+    const modes = (data.perSource ?? []).map((p: any) => `${p.name}: ${p.extractor}`).join("; ");
     setMsg({
-      kind: data.mode === "groq" ? "ok" : "warn",
-      text: `Extracted ${data.count} claims via ${data.mode === "groq" ? "Groq LLM" : "deterministic heuristic (no GROQ_API_KEY set)"}${data.errors?.length ? ` — fallbacks: ${data.errors.join("; ")}` : ""}. Now review them.`,
+      kind: data.errors?.length ? "warn" : "ok",
+      text: `Extracted ${data.count} claims — ${modes || "done"}. Now review them.`,
     });
     load();
   }
@@ -71,16 +73,16 @@ export default function Dashboard() {
 
       <div className="grid grid-stats">
         <div className="stat"><div className="num">{total}</div><div className="lbl">Claims</div></div>
-        <div className="stat verified"><div className="num">{state.byStatus.verified}</div><div className="lbl">Verified</div></div>
+        <div className="stat verified"><div className="num">{state.byStatus.verified}</div><div className="lbl">Verified (quote+support)</div></div>
         <div className="stat inferred"><div className="num">{state.byStatus.inferred}</div><div className="lbl">Inferred</div></div>
         <div className="stat conflicting"><div className="num">{state.byStatus.conflicting}</div><div className="lbl">Conflicting</div></div>
         <div className="stat missing"><div className="num">{state.byStatus.missing}</div><div className="lbl">Missing</div></div>
-        <div className="stat"><div className="num">{state.byReview.pending}</div><div className="lbl">Awaiting review</div></div>
+        <div className="stat"><div className="num">{state.pendingUnreviewed}</div><div className="lbl">Awaiting review</div></div>
         <div className="stat">
-          <div className="num" style={{ color: state.citationValidity.total > 0 && state.citationValidity.valid === state.citationValidity.total ? "var(--verified)" : "var(--inferred)" }}>
-            {state.citationValidity.total > 0 ? Math.round((state.citationValidity.valid / state.citationValidity.total) * 100) + "%" : "—"}
+          <div className="num" style={{ fontSize: "1.3rem" }}>
+            {state.quotesFound.total > 0 ? `${state.quotesFound.found}/${state.quotesFound.total}` : "—"}
           </div>
-          <div className="lbl">Citation validity</div>
+          <div className="lbl">Quotes found in source</div>
         </div>
       </div>
 
@@ -88,7 +90,7 @@ export default function Dashboard() {
 
       <h2>Sources ({state.sources.length})</h2>
       {state.sources.length === 0 ? (
-        <div className="panel muted">No sources yet. Import one below — the seeded demo sources appear after the first extraction run, or import your own.</div>
+        <div className="panel muted">No sources visible to your role. Import one below (lead only).</div>
       ) : (
         <div className="panel" style={{ padding: 0 }}>
           <table>
@@ -120,7 +122,7 @@ export default function Dashboard() {
           <form className="panel" onSubmit={importSource}>
             <div className="field">
               <label>Name</label>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Standup notes — April" required />
+              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Standup notes — April" required maxLength={120} />
             </div>
             <div className="grid grid-2" style={{ gap: "0.7rem" }}>
               <div className="field">
@@ -143,10 +145,10 @@ export default function Dashboard() {
             </div>
             <div className="field">
               <label>Author</label>
-              <input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} placeholder="who wrote this" />
+              <input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} placeholder="who wrote this" maxLength={120} />
             </div>
             <div className="field">
-              <label>Content</label>
+              <label>Content (max 1 MB text)</label>
               <textarea value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} placeholder="Paste meeting notes, a chat export or a task board…" required />
             </div>
             <div className="field">

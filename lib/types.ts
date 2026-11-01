@@ -12,6 +12,8 @@ export type ClaimType =
   | "contact";
 export type ClaimStatus = "verified" | "inferred" | "conflicting" | "missing";
 export type ReviewState = "pending" | "accepted" | "edited" | "rejected" | "unknown";
+// support check verdict: does the quote actually say what the claim asserts?
+export type SupportVerdict = "yes" | "partial" | "no" | "not-checked";
 
 export interface Chunk {
   id: string;
@@ -29,15 +31,25 @@ export interface Source {
   accessLevel: AccessLevel;
   author: string;
   importedAt: string;
+  /** When the notes/export were written. Used for timeline year inference.
+   *  Defaults to importedAt and is then flagged as "assumed". */
+  referenceDate: string;
+  referenceDateAssumed: boolean;
   content: string;
+  contentHash: string; // SHA-256, for duplicate detection
   confirmedPermission: boolean;
 }
 
 export interface Evidence {
   chunkId: string;
   sourceId: string;
-  quote: string; // verbatim, exact-match verified against source
-  quoteVerified: boolean;
+  quote: string; // the EXACT source substring (model output is replaced by this)
+  /** "exact" = character-perfect match; "normalized" = matches ignoring
+   *  case/whitespace/curly quotes. Shown honestly in the UI. */
+  matchType: "exact" | "normalized" | "none";
+  quoteVerified: boolean; // matchType !== "none"
+  charStart: number; // offsets into the ORIGINAL source content
+  charEnd: number;
 }
 
 export interface Claim {
@@ -47,11 +59,16 @@ export interface Claim {
   topic: string; // grouping key for conflict detection
   status: ClaimStatus;
   confidence: number; // 0..1, only meaningful for inferred
+  /** Does the quote support the claim? Separate from quote existence (S1-2). */
+  supported: SupportVerdict;
+  supportReason?: string; // model's reason when supported != not-checked
+  extractedBy: "groq" | "heuristic";
   evidence: Evidence[];
   statusReason: string; // why this status was assigned
   stale?: boolean; // source mentions an old last-activity date
   reviewState: ReviewState;
   reviewNote?: string;
+  originalText?: string; // preserved when a reviewer edits the claim
   conflictingWith?: string[]; // claim ids when status = conflicting
   createdAt: string;
 }
@@ -60,9 +77,11 @@ export interface ReviewAction {
   id: string;
   claimId: string;
   action: ReviewState;
-  actor: string;
+  actor: string; // always the session user, never from the request body
   at: string;
   note?: string;
+  before?: { text: string; status: ClaimStatus; reviewState: ReviewState };
+  after?: { text: string; status: ClaimStatus; reviewState: ReviewState };
 }
 
 export interface AuditEntry {
@@ -98,8 +117,25 @@ export interface RoleViewResult {
   excludedCount: number;
 }
 
-export const ROLE_MATRIX: Record<string, { label: string; seeBelow: AccessLevel[] }> = {
-  lead: { label: "Reviewer / project lead", seeBelow: ["public", "internal", "restricted"] },
-  successor: { label: "Incoming member (full successor)", seeBelow: ["public", "internal"] },
-  junior: { label: "Incoming member (restricted)", seeBelow: ["public"] },
+export const ROLE_MATRIX: Record<string, { label: string; seeBelow: AccessLevel }> = {
+  lead: { label: "Reviewer / project lead", seeBelow: "restricted" },
+  successor: { label: "Incoming member (full successor)", seeBelow: "internal" },
+  junior: { label: "Incoming member (restricted)", seeBelow: "public" },
 };
+
+export const ACCESS_ORDER: Record<AccessLevel, number> = {
+  public: 0,
+  internal: 1,
+  restricted: 2,
+};
+
+export const VALID_KINDS: SourceKind[] = ["meeting-notes", "chat-export", "task-board", "doc"];
+export const VALID_LEVELS: AccessLevel[] = ["public", "internal", "restricted"];
+export const VALID_TYPES: ClaimType[] = [
+  "decision",
+  "owner",
+  "risk",
+  "dependency",
+  "open-question",
+  "contact",
+];

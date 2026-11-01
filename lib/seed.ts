@@ -2,15 +2,23 @@
 //  1. Two conflicting decisions (database: Postgres vs SQLite)
 //  2. One decision without rationale (Postgres chosen — no "why" anywhere)
 //  3. One stale task (auth refactor, untouched for 5 months)
-//  4. One confidential item (Stripe live secret key — restricted source)
-//  5. One undocumented dependency (Redis owned only by the departing member)
+//  4. One confidential item (fake Stripe key — restricted source; the key is
+//     deliberately NOT a valid shape: sk_test_FAKE_DEMO_KEY_00000000)
+//  5. One undocumented dependency (deploy password owned only by the leaver)
 
 import { DB, Source } from "./types";
 import { chunkSource } from "./extract";
 import { appendAudit } from "./store";
 import { randomId } from "./id";
+import { createHash } from "crypto";
 
-export const SEED_SOURCES: Omit<Source, "id" | "importedAt">[] = [
+// Notes and chat are dated around March 14; used for timeline year inference.
+export const DEMO_REFERENCE_DATE = "2026-03-15T00:00:00.000Z";
+
+export const SEED_SOURCES: Omit<
+  Source,
+  "id" | "importedAt" | "contentHash" | "referenceDate" | "referenceDateAssumed"
+>[] = [
   {
     name: "Standup notes — March sprint",
     kind: "meeting-notes",
@@ -44,7 +52,7 @@ Mei: Open question: do we still need the nightly regrade job? It costs 40 minute
 <Mar 4> rahul: i thought priya decided it, i just built it
 <Mar 8> mei: the stripe webhook fails with 400 on every live order since tuesday
 <Mar 8> rahul: yeah the signature check broke after the SDK upgrade
-<Mar 9> priya: anyone has the deploy SSH password? rahul set it up and he's on leave
+<Mar 9> priya: anyone has the deploy password? rahul set it up and he's on leave
 <Mar 9> rahul: it's in the shared vault, ask me when I'm back on the 15th`,
   },
   {
@@ -71,7 +79,7 @@ STALE / UNTOUCHED
     confirmedPermission: true,
     content: `CONFIDENTIAL — do not share outside the core team
 
-Payment setup: the live Stripe secret key is sk_live_51H8xQ2eZvKYlo2C00xRAbCdEfGhIjKlMnOpQrStUv and it is configured only on rahul's laptop .env; nobody else can rotate it.
+Payment setup: the live payment secret key is sk_test_FAKE_DEMO_KEY_00000000 and it is configured only on rahul's laptop .env; nobody else can rotate it.
 Production DB password is stored in rahul's password manager only — this is a single point of failure.
 Third-party: the Gradescope integration token expires Apr 30; renewal requires the department admin (contact: Dr. Anita Rao).`,
   },
@@ -84,6 +92,9 @@ export function seedIfEmpty(db: DB): DB {
       ...s,
       id: randomId("src"),
       importedAt: new Date().toISOString(),
+      referenceDate: DEMO_REFERENCE_DATE,
+      referenceDateAssumed: false,
+      contentHash: createHash("sha256").update(s.content).digest("hex"),
     };
     db.sources.push(source);
     db.chunks.push(...chunkSource(source));

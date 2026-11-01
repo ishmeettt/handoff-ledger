@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { api } from "@/lib/client";
 
 interface Src {
   id: string; name: string; kind: string; accessLevel: string; author: string;
@@ -19,9 +20,9 @@ export default function SourcesPage() {
   const [selected, setSelected] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const s = await (await fetch("/api/sources")).json();
+    const { data: s } = await api<any>("/api/sources?withContent=1");
     setSources(s.sources ?? []);
-    const st = await (await fetch("/api/state")).json();
+    const { data: st } = await api<any>("/api/state");
     setClaims(st.claims ?? []);
     if ((s.sources ?? []).length > 0 && !selected) setSelected(s.sources[0].id);
   }, [selected]);

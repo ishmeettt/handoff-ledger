@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { api } from "@/lib/client";
 
 interface Ev {
   claimId: string; type: string; status: string; reviewState: string;
   text: string; sourceName: string; date: string | null;
-  datePrecision: "day" | "none"; dateEvidence: string | null;
+  yearInferred: boolean; dateEvidence: string | null;
 }
 
 const TYPE_ICON: Record<string, string> = {
@@ -18,7 +19,7 @@ export default function TimelinePage() {
   const [onlyKey, setOnlyKey] = useState(false);
 
   useEffect(() => {
-    fetch("/api/timeline").then((r) => r.json()).then((d) => setEvents(d.events ?? []));
+    api<any>("/api/timeline").then(({ data }) => setEvents(data.events ?? []));
   }, []);
 
   if (!events) return <p className="muted">Loading…</p>;
@@ -39,7 +40,13 @@ export default function TimelinePage() {
     const key = e.date ?? "__undated";
     const g = groups.find((x) => (x.date ?? "__undated") === key);
     if (g) g.items.push(e);
-    else groups.push({ label: e.date ? new Date(e.date + "T00:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "Undated (source order)", date: e.date, items: [e] });
+    else groups.push({
+      label: e.date
+        ? new Date(e.date + "T00:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })
+        : "No date in source (source order)",
+      date: e.date,
+      items: [e],
+    });
   }
 
   return (
@@ -60,6 +67,9 @@ export default function TimelinePage() {
           <div className="mono" style={{ color: "var(--accent)", fontWeight: 700, marginBottom: "0.6rem" }}>
             {g.label}
             {g.date && <span className="muted" style={{ fontWeight: 400 }}> · parsed from source text</span>}
+            {g.items.some((i) => i.yearInferred) && g.date && (
+              <span className="muted" style={{ fontWeight: 400 }}> · year inferred from the source's date</span>
+            )}
           </div>
           <div className="timeline">
             {g.items.map((e) => (

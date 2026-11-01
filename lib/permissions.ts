@@ -1,28 +1,33 @@
-// Permission-first access control: filtering happens BEFORE anything is handed to a view.
-// A restricted role never receives restricted chunks or claims in any API payload.
+// Permission-first access control: filtering happens BEFORE anything is handed
+// to a view. A restricted role never receives restricted chunks or claims in
+// any API payload. Unknown sources fail CLOSED (review item S3-h).
 
-import { AccessLevel, Claim, RoleViewResult, Source } from "./types";
-
-const LEVEL_ORDER: Record<AccessLevel, number> = { public: 0, internal: 1, restricted: 2 };
+import {
+  AccessLevel,
+  Claim,
+  DB,
+  RoleViewResult,
+  Source,
+  ACCESS_ORDER,
+} from "./types";
+import { Role, roleMaxLevel } from "./session";
 
 export function allowedLevels(maxLevel: AccessLevel): AccessLevel[] {
-  const max = LEVEL_ORDER[maxLevel];
-  return (Object.keys(LEVEL_ORDER) as AccessLevel[]).filter((l) => LEVEL_ORDER[l] <= max);
+  const max = ACCESS_ORDER[maxLevel];
+  return (Object.keys(ACCESS_ORDER) as AccessLevel[]).filter(
+    (l) => ACCESS_ORDER[l] <= max
+  );
 }
 
-/** Filter sources the role may see. */
-export function filterSources(sources: Source[], roleMax: AccessLevel): Source[] {
-  const allowed = allowedLevels(roleMax);
-  return sources
-    .filter((s) => allowed.includes(s.accessLevel))
-    .map((s) => ({ ...s, content: "[content available to pipeline only]" }));
+/** Sources the role may see. Used by /api/sources. */
+export function filterSourcesForRole(db: DB, role: Role): Source[] {
+  const allowed = allowedLevels(roleMaxLevel(role));
+  return db.sources.filter((s) => allowed.includes(s.accessLevel));
 }
 
-/**
- * Filter claims by the access level of the source they cite.
- * A claim citing a source above the role's level is EXCLUDED, not shown with hidden details.
- * Returns the visible claims plus a count of exclusions (the "excluded-items indicator").
- */
+/** Filter claims by the access level of the source they cite.
+ * A claim citing a source above the role's level is EXCLUDED, not shown with
+ * hidden details. Returns visible claims + the count of exclusions. */
 export function filterClaims(
   claims: Claim[],
   sources: Source[],
@@ -34,32 +39,64 @@ export function filterClaims(
   let excluded = 0;
   for (const cl of claims) {
     const levels = cl.evidence.map((e) => levelBySource.get(e.sourceId));
-    // no evidence (a gap) → visible to every role; it leaks nothing
+    // unknown/deleted source -> treated as restricted (fail closed)
     const forbidden =
-      cl.evidence.length > 0 && levels.some((l) => l && !allowed.includes(l));
+      cl.evidence.length > 0 &&
+      levels.some((l) => !l || !allowed.includes(l));
     if (forbidden) {
       excluded++;
       continue;
     }
-    // strip evidence chunks from sources the role may not read (defense in depth)
     visible.push({
       ...cl,
       evidence: cl.evidence.filter((e) => {
         const l = levelBySource.get(e.sourceId);
-        return l && allowed.includes(l);
+        return !!l && allowed.includes(l);
       }),
     });
   }
   return { visible, excludedCount: excluded };
 }
 
+// ---------- redaction (review item S2-5) ----------
+// Specific provider patterns first, then a strict generic rule that requires
+// an explicit separator AND a value mixing letters and digits (so ordinary
+// phrases like "password infrastructure team" are NOT redacted).
+
+const SPECIFIC_PATTERNS: RegExp[] = [
+  // Stripe test/live keys (note: demo seed uses sk_test_FAKE...)
+  /\b(?:sk|pk)_(?:live|test)_?[A-Za-z0-9_]{6,}\b/g,
+  // GitHub tokens
+  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  // AWS access key IDs
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  // Slack tokens
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gi,
+  // JWTs
+  /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
+  // PEM private keys (incl. anything up to end marker, handled line-wise)
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  // Connection strings with credentials
+  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s@]+@[^\s]+/gi,
+  // Authorization headers
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
+];
+
+// Generic: label, explicit separator (":" "=" or "is"), then a value of 8+
+// chars that contains BOTH a letter and a digit (or symbol).
+const GENERIC_SECRET =
+  /\b(password|passwd|pwd|secret|token|api[_-]?key)\b\s*(?:is|=|:)\s*["']?(?=[^\s"']*\d)(?=[^\s"']*[A-Za-z])[^\s"']{8,}/gi;
+
 export function redactSecrets(text: string): string {
-  return text
-    // Stripe-style keys: sk_live_…, sk_test_…, pk_live_…
-    .replace(/\b(?:sk|pk)_(?:live|test)_?[A-Za-z0-9]{8,}\b/g, "[REDACTED-CREDENTIAL]")
-    // generic credential assignments: api_key=…, token: …, secret …
-    .replace(/\b(api[_-]?key|token|secret|password|credential)(?:\s*[:=]\s*|\s+)["']?[A-Za-z0-9/_-]{12,}/gi, "$1=[REDACTED-CREDENTIAL]")
-    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, (m) =>
-      m.includes("example.com") ? m : "[REDACTED-EMAIL]"
-    );
+  let out = text;
+  for (const re of SPECIFIC_PATTERNS) {
+    out = out.replace(re, "[REDACTED-CREDENTIAL]");
+  }
+  out = out.replace(GENERIC_SECRET, "$1=[REDACTED-CREDENTIAL]");
+  // emails (demo exception: example.com addresses are fake and kept)
+  out = out.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, (m) =>
+    m.includes("example.com") ? m : "[REDACTED-EMAIL]"
+  );
+  return out;
 }

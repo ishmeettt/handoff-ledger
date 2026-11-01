@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import UserBar from "@/components/UserBar";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,9 +23,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/timeline">Timeline</Link>
               <Link href="/review">Review&nbsp;board</Link>
               <Link href="/publish">Publish</Link>
-              <Link href="/handover/successor" className="nav-cta">
+              <Link href="/handover" className="nav-cta">
                 Handover&nbsp;view&nbsp;→
               </Link>
+              <UserBar />
             </nav>
           </div>
         </header>

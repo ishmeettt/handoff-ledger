@@ -20,9 +20,14 @@ Every component below exists to enforce one clause of that sentence.
 │                        PIPELINE (steps 2–3)                                  │
 │  lib/extract.ts                                                              │
 │   1. chunk each source                                                       │
-│   2. extract claims (Groq JSON-schema OR deterministic heuristic fallback)   │
-│   3. VERIFY: every quote must exact-match its source — abstain otherwise     │
-│   4. detect conflicts (disagreeing decision statements)                      │
+│   2. extract claims (restricted sources: local heuristic only; else Groq     │
+│      JSON-object output validated against the six allowed types, or the       │
+│      deterministic heuristic fallback without a key)                          │
+│   3. VERIFY: every quote must exist verbatim in its source (offsets recorded) │
+│      — abstain otherwise — then a batched support check asks whether the      │
+│      quote actually states the claim; Verified requires BOTH                 │
+│   4. detect conflicts (candidate pairs verified by an LLM disagreement check; │
+│      strict local option check when no key or restricted content is involved)│
 │   5. detect staleness (old last-activity dates)                              │
 │   6. detect gaps (missing types + decisions without rationale)               │
 └───────────────┬──────────────────────────────────────────────────────────────┘
@@ -34,7 +39,7 @@ Every component below exists to enforce one clause of that sentence.
 │  HUMAN GATE (step 5)             │   │  GAP INTERVIEW (step 4)               │
 │  /review · accept / edit /       │   │  every "missing" claim IS a targeted  │
 │  reject / mark unknown           │   │  question for the departing member;  │
-│  every action → audit log        │   │  their answer becomes a new claim     │
+│  every action → audit log        │   │  answers become new claims (R3 flow)  │
 └───────────────┬──────────────────┘   └───────────────────────────────────────┘
                 ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -44,11 +49,12 @@ Every component below exists to enforce one clause of that sentence.
 └───────────────┬──────────────────────────────────────────────────────────────┘
                 ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│  SERVE (step 7) — /api/view?role=                                            │
+│  SERVE (step 7) — /api/view · role from the signed session                    │
 │  permission-first: claims whose evidence cites a source ABOVE the role's     │
 │  level are removed BEFORE the response is built. The role sees a COUNT of    │
 │  excluded items, never their content. Secrets are redacted as defense in     │
-│  depth. Q&A / views answer only from the permitted chunks.                   │
+│  depth. Every listing endpoint (sources, state, timeline, view) applies the  │
+│  same filter; no endpoint answers from restricted chunks for a junior role.  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -61,7 +67,7 @@ Every component below exists to enforce one clause of that sentence.
 | Source | access level (`public`/`internal`/`restricted`) + confirmed permission |
 | Chunk | char offsets into the source, so quotes stay verifiable |
 | Claim | type, status (4 honest states), topic key, review state |
-| Evidence | verbatim quote + `quoteVerified` (exact-match result) |
+| Evidence | verbatim quote + `quoteVerified` (exact-match result) + char `start`/`end` offsets + `matchType` (exact vs normalized) |
 | ReviewAction | who did what to which claim, when, why — the audit trail |
 | HandoverVersion | immutable snapshot of approved claims at publish time |
 
@@ -72,9 +78,9 @@ plan's Postgres target, so the Round 3 swap is mechanical.
 
 | Status | Assigned when | Reviewer's lever |
 |---|---|---|
-| **Verified** | quote exists verbatim in the source and supports the claim | accept |
-| **Inferred** | extracted/reasoned, labelled as such | accept to confirm, or edit |
-| **Conflicting** | ≥2 decision statements disagree on a shared topic | accept one side, reject the other |
+| **Verified** | quote exists verbatim in the source AND a support check says the quote states the claim | accept |
+| **Inferred** | extracted/reasoned, labelled as such (includes every heuristic claim and every restricted-source claim) | accept to confirm, or edit |
+| **Conflicting** | a candidate pair (shared topic, competing options) verified as disagreeing — by the LLM check, or a strict local option check for restricted content / no key | accept one side, reject the other |
 | **Missing** | expected knowledge has no evidence | mark unknown / answer in gap interview |
 
 ## Permission matrix
@@ -89,20 +95,37 @@ Filtering happens in `lib/permissions.ts` **before** any view payload exists —
 not as a UI hide. `redactSecrets()` masks credential-shaped strings as a second
 layer even for roles that are allowed to see the source.
 
+Authentication (`lib/session.ts`): every API route requires a signed httpOnly
+session cookie (scrypt-hashed demo passwords, HMAC-signed payload). The role is
+read from the session — never from the URL or request body — and `actor` /
+`publishedBy` in the audit trail come from the session user, so actions cannot
+be forged by the client.
+
 ## AI extraction (Groq) and its safety gate
 
-`GROQ_API_KEY` → `llama-3.3-70b-versatile` with a JSON response format. The model
-is instructed to copy quotes verbatim; the pipeline then re-verifies every quote by
-exact match and **drops any claim whose quote cannot be found** (abstain-on-failure).
-Without a key, a deterministic heuristic extractor runs the same verification gate —
-so quote honesty is guaranteed by code, not by the model.
+`GROQ_API_KEY` → `openai/gpt-oss-120b` with a JSON-object response format
+(validated in code: the six claim types only, quotes located verbatim in the
+source or the claim is dropped — abstain-on-failure). The model is instructed
+to copy quotes verbatim; the pipeline re-verifies every quote by exact match at
+recorded offsets, then a batched support check confirms the quote actually
+states the claim — **Verified requires both**. Without a key, a deterministic
+heuristic extractor runs the same quote gate, so quote honesty is guaranteed by
+code, not by the model.
+
+**Data-handling policy (restricted sources):** a `restricted` source is never
+sent to the external model — extraction runs the local heuristic, its claims are
+excluded from the support check, and conflict pairs citing it are decided by the
+local option check. The self-test asserts this.
 
 ## Self-test (`npm run selftest`)
 
 Walks the whole flow against a running server and asserts the plan's success
-criteria: all five planted facts found and labelled, no claim Verified without an
-exact quote, publish blocked with zero reviews, zero permission leaks for
-confidential strings, immutable versions, timeline + evidence endpoints live.
+criteria: all five planted facts found and labelled (and the decoy pair NOT
+flagged as a conflict), no claim Verified without an exact quote AND a passed
+support check, publish blocked with zero reviews, 401 without a session on
+every endpoint, zero permission leaks across every endpoint for junior and
+successor roles, the restricted-never-sent-to-the-model policy, session-derived
+audit actors, immutable versions, timeline + evidence endpoints live.
 
 ## Rounds
 
