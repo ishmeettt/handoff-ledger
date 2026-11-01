@@ -15,7 +15,7 @@ const handler = guard(["lead"], async (req: NextRequest, user) => {
   if (!claimId || (action !== "resolve" && !VALID.includes(action))) {
     return Response.json({ error: "claimId and valid action required" }, { status: 400 });
   }
-  const db = getDB();
+  const db = await getDB();
   const claim = db.claims.find((c) => c.id === claimId);
   if (!claim) return Response.json({ error: "claim not found" }, { status: 404 });
 
@@ -76,7 +76,7 @@ const handler = guard(["lead"], async (req: NextRequest, user) => {
       "review:resolve",
       `Conflict resolved: kept ${winner.id}, rejected ${losers.length} other side(s)`
     );
-    saveDB(db);
+    await saveDB(db);
     return Response.json({ ok: true, winner, losers });
   }
 
@@ -121,7 +121,7 @@ const handler = guard(["lead"], async (req: NextRequest, user) => {
     `review:${action}`,
     `Claim ${claimId}: ${redactSecrets(claim.text.slice(0, 80))}`
   );
-  saveDB(db);
+  await saveDB(db);
   return Response.json({ ok: true, claim });
 });
 

@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 // Timeline over the ROLE-FILTERED claim set (review S1-3): a junior never
 // receives restricted claim text through this endpoint either.
 const handler = guard(undefined, async (req: NextRequest, user) => {
-  const db = getDB();
+  const db = await getDB();
   const { visible } = filterClaims(db.claims, db.sources, roleMaxLevel(user.role));
   const events = buildTimeline(visible, db.sources).map((e) => ({
     ...e,

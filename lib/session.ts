@@ -66,8 +66,14 @@ function signingSecret(): Buffer {
     cachedSecret = fs.readFileSync(file);
   } catch {
     cachedSecret = randomBytes(32);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, cachedSecret, { mode: 0o600 });
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, cachedSecret, { mode: 0o600 });
+    } catch {
+      // Workers have no filesystem: this isolate keeps its own random secret.
+      // Deployments set SESSION_SECRET (the branch above) so cookies survive
+      // isolate rotation; locally the data/ file keeps it stable.
+    }
   }
   return cachedSecret;
 }

@@ -9,8 +9,8 @@ export const runtime = "nodejs";
 // Reviewer-facing full state. LEAD ONLY — successor/junior must not be able to
 // read the live draft, unredacted claims or restricted evidence (review S1-1).
 const handler = guard(["lead"], async () => {
-  const db = seedIfEmpty(getDB());
-  saveDB(db);
+  const db = seedIfEmpty(await getDB());
+  await saveDB(db);
 
   const byStatus = { verified: 0, inferred: 0, conflicting: 0, missing: 0 };
   const byReview = { pending: 0, accepted: 0, edited: 0, rejected: 0, unknown: 0 };

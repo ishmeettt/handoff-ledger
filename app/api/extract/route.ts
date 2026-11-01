@@ -29,7 +29,7 @@ const EXPECTED_TYPES: ClaimType[] = [
 
 // LEAD ONLY — extraction is a reviewer action (review S1-1).
 const handler = guard(["lead"], async () => {
-  const db = seedIfEmpty(getDB());
+  const db = seedIfEmpty(await getDB());
   if (db.sources.length === 0) {
     return Response.json({ error: "Import a source first." }, { status: 400 });
   }
@@ -121,7 +121,7 @@ const handler = guard(["lead"], async () => {
     "extract",
     `Extracted ${claims.length} claims [${perSource.map((p) => `${p.name}: ${p.extractor}`).join("; ")}]`
   );
-  saveDB(db);
+  await saveDB(db);
   return Response.json({ count: claims.length, perSource, errors });
 });
 

@@ -15,7 +15,7 @@ const MAX_CONTENT = 1_000_000; // 1 MB of text per source
 // GET: any signed-in role. Content is included ONLY for sources within the
 // caller's access level, and is redacted on the way out.
 const getHandler = guard(undefined, async (req: NextRequest, user) => {
-  const db = seedIfEmpty(getDB());
+  const db = seedIfEmpty(await getDB());
   const withContent = req.nextUrl.searchParams.get("withContent") === "1";
   const visible = filterSourcesForRole(db, user.role);
   return Response.json({
@@ -76,7 +76,7 @@ const postHandler = guard(["lead"], async (req: NextRequest, user) => {
     );
   }
 
-  const db = seedIfEmpty(getDB());
+  const db = seedIfEmpty(await getDB());
   const contentHash = createHash("sha256").update(content).digest("hex");
   const dup = db.sources.find((s) => s.contentHash === contentHash);
   if (dup) {
@@ -100,7 +100,7 @@ const postHandler = guard(["lead"], async (req: NextRequest, user) => {
   const chunks = chunkSource(source);
   db.chunks.push(...chunks);
   appendAudit(db, user.name, "import-source", `Imported "${source.name}" (${source.accessLevel}, ${chunks.length} chunks)`);
-  saveDB(db);
+  await saveDB(db);
   return Response.json({ id: source.id, chunks: chunks.length });
 });
 

@@ -4,6 +4,13 @@
 
 Round 2 build of the competition plan. All demonstration data is synthetic and created during the build window.
 
+**Live demo** (Freebuff Sites, Cloudflare Workers + D1):
+
+- Production: <https://site-33806628e9554e34946540809e2ba016.freebuff.page>
+- Preview: <https://site-29201b42cd7a48de84af6b8b4611fb4e.freebuff.page>
+
+Both run the full 55-check self-test suite against the live URL.
+
 Built with **Codebuff** 🤖 — the AI pair-programming agent — with human review
 of every change; commit messages carry the same disclosure.
 
@@ -36,7 +43,7 @@ Two more Round 2 views make every claim checkable:
 npm install
 npm run dev        # http://localhost:3000
 npm run test       # 17 unit tests: redaction, quote matching, statuses, conflicts, permissions, timeline
-npm run selftest   # in another terminal: 54-check planted-fact + permission-leak suite
+npm run selftest   # in another terminal: 55-check planted-fact + permission-leak suite
 ```
 
 Unit tests run in CI (GitHub Actions) on every push: typecheck + the suite above.
@@ -112,7 +119,7 @@ lib/types.ts      data model: Source → Chunk → Claim → Evidence → Review
 lib/extract.ts    chunking, claim extraction (Groq + heuristic), quote + support verification, conflict/staleness/gap detection
 lib/permissions.ts role matrix, permission-first filtering, secret redaction
 lib/seed.ts       synthetic demo project with planted facts
-lib/store.ts      JSON-file store (swap target: SQLite/Postgres in Round 3)
+lib/store.ts      document store — D1 (SQLite) on Cloudflare Workers, JSON-file fallback locally
 components/       TopNav (active-route pills, theme toggle), UserBar
 public/           HUD wallpapers
 app/              Next.js App Router UI + API routes

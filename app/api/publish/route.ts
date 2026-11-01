@@ -15,7 +15,7 @@ const PUBLISHABLE = new Set(["accepted", "edited", "unknown"]);
 // LEAD ONLY. publishedBy always comes from the signed session.
 const handler = guard(["lead"], async (req: NextRequest, user) => {
   const { note } = await req.json().catch(() => ({}));
-  const db = getDB();
+  const db = await getDB();
   if (db.claims.length === 0) {
     return Response.json({ error: "Nothing to publish — run extraction first." }, { status: 400 });
   }
@@ -77,7 +77,7 @@ const handler = guard(["lead"], async (req: NextRequest, user) => {
     "publish",
     `Published handover v${version}: ${publishable.length} claims published, ${heldBack.length} held back (unreviewed)`
   );
-  saveDB(db);
+  await saveDB(db);
   return Response.json({
     version,
     hash,

@@ -6,3 +6,6 @@ data/
 .env*.local
 *.tsbuildinfo
 next-env.d.ts
+/freebuff-sites-build/
+/.open-next/
+/.wrangler/

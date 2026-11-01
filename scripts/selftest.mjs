@@ -123,6 +123,16 @@ async function main() {
     const state = (await req("/api/state", { cookie: lead })).data;
     const claims = state.claims ?? [];
     check("claims extracted", claims.length > 0, `${claims.length} claims`);
+    // freshness gate: the assertions below must judge THIS run's extraction,
+    // never a stale database left over from an earlier run
+    const extractedAge = Date.now() - Date.parse(state.extractedAt ?? "");
+    check(
+      "extraction ran fresh on this database",
+      Number.isFinite(extractedAge) && extractedAge < 15 * 60 * 1000,
+      state.extractedAt ? `age ${Math.round(extractedAge / 1000)}s` : "no extractedAt"
+    );
+    // publish versions are counted from this run's baseline, not hard-coded
+    const baseV = state.versions?.length ?? 0;
 
     // ---------- C. planted facts ----------
     const decisions = claims.filter((c) => c.type === "decision");
@@ -224,8 +234,8 @@ async function main() {
     pub = await req("/api/publish", { method: "POST", body: {}, cookie: lead });
     check(
       "publish with ONLY unknown-reviewed claims warns (noRealClaims)",
-      pub.status === 200 && (pub.data.noRealClaims ?? 0) >= 1,
-      `v${pub.data.version}, noRealClaims=${pub.data.noRealClaims}`
+      pub.status === 200 && (pub.data.noRealClaims ?? 0) >= 1 && pub.data.version === baseV + 1,
+      `v${pub.data.version} (baseline v${baseV}), noRealClaims=${pub.data.noRealClaims}`
     );
 
     // conflict resolution (review S2-8): winner accepted, counterpart rejected
@@ -288,7 +298,11 @@ async function main() {
 
     // ---------- F. publish + immutability ----------
     pub = await req("/api/publish", { method: "POST", body: {}, cookie: lead });
-    check("publish creates an immutable version", pub.status === 200 && pub.data.version === 2, `v${pub.data.version ?? "?"} (v1 was the unknown-only warning publish)`);
+    check(
+      "publish creates an immutable version",
+      pub.status === 200 && pub.data.version === baseV + 2,
+      `v${pub.data.version ?? "?"} (baseline v${baseV}, first was the unknown-only warning publish)`
+    );
 
     // ---------- G. role leak scans across ALL endpoints ----------
     for (const [who, cookie] of [["successor", sam], ["junior", lee]]) {
@@ -356,8 +370,8 @@ async function main() {
     const versions = (await req("/api/state", { cookie: lead })).data.versions;
     check(
       "next publish -> new version, previous snapshot unchanged",
-      pub2.data.version === 3 && versions[0].claimCount === prevCount,
-      `now v${pub2.data.version}`
+      pub2.data.version === baseV + 3 && versions[0].claimCount === prevCount,
+      `now v${pub2.data.version} (baseline v${baseV})`
     );
     check(
       "every published version carries a SHA-256 snapshot hash",

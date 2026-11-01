@@ -18,7 +18,7 @@ const handler = guard(undefined, async (req: NextRequest, user) => {
       : user.role;
   const maxLevel = roleMaxLevel(effRole);
 
-  const db = getDB();
+  const db = await getDB();
   const version = db.versions.at(-1);
   if (!version) {
     return Response.json(
