@@ -32,13 +32,25 @@ Two more Round 2 views make every claim checkable:
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm run selftest   # in another terminal: 49-check planted-fact + permission-leak suite
+npm run selftest   # in another terminal: 50-check planted-fact + permission-leak suite
 ```
 
-Sign in at `/login` with one of the three demo users — **Priya** (lead), **Sam**
-(successor), **Lee** (junior), password `handoff-demo`. The role comes from the
-signed session cookie, never from the URL or request body; every API endpoint
-returns 401 without a session.
+### Sign in
+
+The login screen offers two paths — **one-click demo roles** (pick an account
+and go straight in) or the **credentials form** (username + password
+`handoff-demo`):
+
+| Account | Role | Sees |
+|---|---|---|
+| **priya** | project lead | everything — all sources, extraction, review, publish |
+| **sam** | incoming successor | public + internal sources; restricted excluded before the response is built |
+| **lee** | incoming junior | public only; sees a count of excluded items, never their content |
+
+The role comes from the signed session cookie (scrypt-hashed passwords,
+HMAC-signed httpOnly cookie), never from the URL or request body; every API
+endpoint returns 401 without a session. There is no self-registration — these
+three seeded accounts are the demo's scope.
 
 Seeded demo project ("Autograder") contains planted test facts:
 two conflicting decisions (Postgres vs SQLite), one decision without rationale,
@@ -61,6 +73,27 @@ confirms them.
 server (heuristic extraction, no support check, local conflict verdicts) —
 restricted content is never sent to the external model.
 
+## Design
+
+A dark **HUD theme** built on the [Adminator 4](https://github.com/puikinsh/Adminator-admin-dashboard)
+token system (MIT), with a monochrome palette taken from the project's own
+sci-fi wallpapers:
+
+![Sign-in page](screenshots/login-page.png)
+![Dashboard after signing in](screenshots/dashboard-after-signin.png)
+
+- **Wallpapers** in `public/` — `hud-frame.png` sits fixed behind every page,
+  `login-frame.png` frames the sign-in screen; panels are translucent so the
+  artwork reads through without hurting legibility.
+- **White-glow accents** — active nav pills, capsule buttons, square markers,
+  corner brackets and hatched dividers echo the wallpapers' highlights.
+  Semantic status colors (verified / inferred / conflicting / missing) are
+  kept because they carry meaning.
+- **Light theme** — toggle in the header, persisted, with a pre-paint script
+  so there is no flash of the wrong theme.
+- **Fonts** — Inter + JetBrains Mono, loaded in `<head>` in parallel with the
+  stylesheet (no render-blocking hop).
+
 ## Architecture
 
 ```
@@ -70,6 +103,8 @@ lib/extract.ts    chunking, claim extraction (Groq + heuristic), quote + support
 lib/permissions.ts role matrix, permission-first filtering, secret redaction
 lib/seed.ts       synthetic demo project with planted facts
 lib/store.ts      JSON-file store (swap target: SQLite/Postgres in Round 3)
+components/       TopNav (active-route pills, theme toggle), UserBar
+public/           HUD wallpapers
 app/              Next.js App Router UI + API routes
 ```
 

@@ -38,7 +38,7 @@ export default function UserBar() {
     <span className="userbar">
       <span className="userbar-name">
         {me!.name}
-        <span className={`badge access-${me!.role === "lead" ? "restricted" : me!.role === "successor" ? "internal" : "public"}`} style={{ marginLeft: "0.45rem" }}>
+        <span className={`badge role-${me!.role}`} style={{ marginLeft: "0.45rem" }}>
           {me!.role}
         </span>
       </span>

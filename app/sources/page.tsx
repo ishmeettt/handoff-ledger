@@ -45,21 +45,19 @@ export default function SourcesPage() {
       <div className="grid" style={{ gridTemplateColumns: "280px 1fr", alignItems: "start" }}>
         <div className="panel" style={{ padding: "0.6rem" }}>
           {sources.map((s) => (
-            <div
+            <button
               key={s.id}
+              type="button"
               onClick={() => setSelected(s.id)}
-              style={{
-                padding: "0.6rem 0.8rem", borderRadius: 8, cursor: "pointer",
-                background: s.id === selected ? "var(--panel2)" : "transparent",
-                border: s.id === selected ? "1px solid var(--border)" : "1px solid transparent",
-              }}
+              className={`src-item${s.id === selected ? " selected" : ""}`}
+              aria-pressed={s.id === selected}
             >
               <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>{s.name}</div>
               <div style={{ marginTop: 4 }}>
                 <span className={`badge access-${s.accessLevel}`}>{s.accessLevel}</span>{" "}
                 <span className="muted mono" style={{ fontSize: "0.75rem" }}>{s.chunks} chunks</span>
               </div>
-            </div>
+            </button>
           ))}
         </div>
 
@@ -127,12 +125,6 @@ function renderHighlighted(content: string, cites: { quote: string; claim: Claim
       <mark
         key={p.start}
         title={`Claim (${p.claim.status}): ${p.claim.text}`}
-        style={{
-          background: "rgba(79,140,255,.22)",
-          color: "var(--text)",
-          borderBottom: "2px solid var(--accent)",
-          padding: "1px 0",
-        }}
       >
         {content.slice(p.start, p.end)}
       </mark>

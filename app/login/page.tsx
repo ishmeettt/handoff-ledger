@@ -38,7 +38,7 @@ export default function LoginPage() {
   }
 
   return (
-    <>
+    <div className="login-hud">
       <h1>Sign in</h1>
       <p className="subtitle">
         Handoff Ledger is permission-first: every API checks your signed session before returning
@@ -89,6 +89,6 @@ export default function LoginPage() {
           <button disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
         </form>
       </div>
-    </>
+    </div>
   );
 }
