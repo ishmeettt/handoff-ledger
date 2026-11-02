@@ -70,6 +70,9 @@ export interface Claim {
   reviewNote?: string;
   originalText?: string; // preserved when a reviewer edits the claim
   conflictingWith?: string[]; // claim ids when status = conflicting
+  /** sha256(type + normalised quote)[:16] — stable across re-extractions so
+   *  review decisions can be re-attached (fixes-only #8). */
+  stableKey?: string;
   createdAt: string;
 }
 

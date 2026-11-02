@@ -10,7 +10,11 @@ import { VALID_KINDS, VALID_LEVELS, SourceKind, AccessLevel } from "@/lib/types"
 
 export const runtime = "nodejs";
 
-const MAX_CONTENT = 1_000_000; // 1 MB of text per source
+// Fixes-only #5: 200k chars on production (D1 row headroom), 1 MB locally;
+// override with MAX_CONTENT for either environment.
+const MAX_CONTENT = Number(
+  process.env.MAX_CONTENT ?? (process.env.NODE_ENV === "production" ? 200_000 : 1_000_000)
+);
 
 // GET: any signed-in role. Content is included ONLY for sources within the
 // caller's access level, and is redacted on the way out.
@@ -61,7 +65,10 @@ const postHandler = guard(["lead"], async (req: NextRequest, user) => {
     return Response.json({ error: "Content must be non-empty text." }, { status: 422 });
   }
   if (content.length > MAX_CONTENT) {
-    return Response.json({ error: "Content exceeds 1 MB. Split the export into parts." }, { status: 422 });
+    return Response.json(
+      { error: `Content exceeds the ${MAX_CONTENT.toLocaleString()}-character import limit. Split the export into parts.` },
+      { status: 413 }
+    );
   }
   // Reject binary-looking payloads instead of importing garbage
   const sample = content.slice(0, 2000);

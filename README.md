@@ -9,7 +9,7 @@ Round 2 build of the competition plan. All demonstration data is synthetic and c
 - Production: <https://site-33806628e9554e34946540809e2ba016.freebuff.page>
 - Preview: <https://site-29201b42cd7a48de84af6b8b4611fb4e.freebuff.page>
 
-Both run the full 55-check self-test suite against the live URL.
+Both run the full 58-check self-test suite against the live URL.
 
 Built with **Codebuff** 🤖 — the AI pair-programming agent — with human review
 of every change; commit messages carry the same disclosure.
@@ -17,11 +17,11 @@ of every change; commit messages carry the same disclosure.
 ## What it does
 
 1. **Connect** — import authorised sources (meeting notes, chat exports, task boards, docs); each source carries an access level (`public` / `internal` / `restricted`) and an explicit permission confirmation.
-2. **Reconstruct** — the pipeline chunks each source and extracts structured claims (decision, owner, risk, dependency, open question, contact).
+2. **Reconstruct** — the pipeline chunks each source and extracts structured claims (decision, owner, risk, dependency, open question, contact). On long imports, chunks are relevance-scored and only the **top-k** go to the model (the deterministic pattern floor still scans every chunk, so planted facts can never be lost to retrieval); model output is schema-validated before it counts. Extraction reports per-step progress with timing and names exactly which extractor ran (`<model> + heuristic` or `heuristic only`).
 3. **Verify** — every claim must carry a verbatim quote; code checks the quote exact-matches its source (offsets recorded), and a batched support check asks whether the quote actually states the claim. Conflicting statements, stale items and missing rationale are detected and labelled honestly.
 4. **Review** — a responsible person accepts, edits, rejects or marks each claim unknown. Every action is logged in an audit trail.
 5. **Publish** — an immutable, versioned handover snapshot. Only reviewed claims (accepted / edited / unknown) and declared gaps are published; unreviewed claims are held back by the human review gate.
-6. **Handover view** — the incoming person sees only what their role permits (`lead` / `successor` / `junior`), with an excluded-items indicator; restricted content is filtered **before** it ever reaches the view, and secrets are redacted as defense in depth.
+6. **Handover view** — the incoming person sees only what their role permits (`lead` / `successor` / `junior`), with an excluded-items indicator; restricted content is filtered **before** it ever reaches the view, and secrets are redacted as defense in depth. It opens with a rule-built **"Start here"** day-one action list (resolve conflicts → get access → decide stale work → ask about gaps → questions → ownership) plus collapsible grouped sections — generated only from the role-filtered claims.
 
 Two more Round 2 views make every claim checkable:
 
@@ -42,8 +42,9 @@ Two more Round 2 views make every claim checkable:
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm run test       # 17 unit tests: redaction, quote matching, statuses, conflicts, permissions, timeline
-npm run selftest   # in another terminal: 55-check planted-fact + permission-leak suite
+npm run test       # 33 unit tests: redaction, quotes, statuses, conflicts, permissions,
+                   # timeline, handover plan, review preservation, retrieval, injection filter
+npm run selftest   # in another terminal: 58-check planted-fact + permission-leak suite
 ```
 
 Unit tests run in CI (GitHub Actions) on every push: typecheck + the suite above.
@@ -61,9 +62,17 @@ and go straight in) or the **credentials form** (username + password
 | **lee** | incoming junior | public only; sees a count of excluded items, never their content |
 
 The role comes from the signed session cookie (scrypt-hashed passwords,
-HMAC-signed httpOnly cookie), never from the URL or request body; every API
-endpoint returns 401 without a session. There is no self-registration — these
-three seeded accounts are the demo's scope.
+HMAC-signed httpOnly cookie, `Secure` in production), never from the URL or
+request body; every API endpoint returns 401 without a session. Failed logins
+are rate-limited (5 per username+IP → 60 s lockout). There is no
+self-registration — these three seeded accounts are the demo's scope.
+
+**The displayed password is for the judged demo only** — it is not a
+production credential. The hosted demo is also a **single shared workspace**
+with synthetic data: other visitors may change it, so the dashboard carries a
+banner and a lead-only **Reset demo data** button that re-seeds, re-extracts
+(fast heuristic run, every claim left pending) and republishes a baseline v1
+so the review → publish flow is always one click away.
 
 Seeded demo project ("Autograder") contains planted test facts:
 two conflicting decisions (Postgres vs SQLite), one decision without rationale,
@@ -94,7 +103,8 @@ exception: `example.com` addresses are fake demo data and are kept as-is.
 
 A dark **HUD theme** built on the [Adminator 4](https://github.com/puikinsh/Adminator-admin-dashboard)
 token system (MIT), with a monochrome palette taken from the project's own
-sci-fi wallpapers:
+sci-fi wallpapers. Code in this repository is MIT-licensed (`LICENSE`); tool
+and asset attributions live in [`docs/AI_AND_TOOLS.md`](docs/AI_AND_TOOLS.md):
 
 ![Sign-in page](screenshots/login-page.png)
 ![Dashboard after signing in](screenshots/dashboard-after-signin.png)

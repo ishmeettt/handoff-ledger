@@ -242,6 +242,51 @@ nav a.nav-cta:hover { background: var(--primary-soft); }
 }
 .theme-toggle:hover { color: var(--primary); border-color: var(--primary); box-shadow: var(--glow-sm); }
 
+/* ---------- Workflow stepper (fixes-only #11) ---------- */
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 0.35rem 1.5rem 0.55rem;
+  border-top: 1px dashed var(--border);
+}
+.stepper-stage-wrap { display: inline-flex; align-items: center; gap: 0.15rem; }
+.stepper-connector { color: var(--t-light); font-size: 0.8rem; }
+.stepper-stage {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.05rem;
+  padding: 0.18rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--t-muted);
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+.stepper-stage:hover { background: var(--bg-hover); color: var(--t-base); text-decoration: none; }
+.stepper-stage .stepper-count {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--t-light);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.stepper-stage.done .stepper-label { color: var(--accent); font-weight: 600; }
+.stepper-stage.current {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: var(--glow-sm);
+}
+.stepper-stage.current .stepper-label { color: var(--primary); font-weight: 700; }
+
 .container { max-width: 1140px; width: 100%; margin: 0 auto; padding: 2.1rem 1.5rem 4.5rem; flex: 1; }
 /* hatched divider above the footer (image motif) */
 .footer {

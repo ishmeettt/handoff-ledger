@@ -12,6 +12,7 @@ import fs from "fs";
 import path from "path";
 import { NextRequest } from "next/server";
 import { AccessLevel, ROLE_MATRIX } from "./types";
+import { SaveError, DocTooLargeError } from "./store";
 
 export type Role = "lead" | "successor" | "junior";
 
@@ -130,7 +131,10 @@ export function readSession(req: NextRequest): SessionUser | null {
 }
 
 export function sessionCookie(token: string): string {
-  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`;
+  // Secure on HTTPS deployments (fixes-only #6); http://localhost still works
+  // because NODE_ENV is development there.
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}${secure}`;
 }
 
 export function clearSessionCookie(): string {
@@ -155,9 +159,29 @@ export function requireUser(req: NextRequest, roles?: Role[]): SessionUser {
   return user;
 }
 
-export function login(username: string, password: string): SessionUser | null {
+// ---------- login rate limit (fixes-only #6) ----------
+// In-memory per isolate: 5 failed attempts per username+IP locks that pair
+// for 60 s. Best-effort on Workers (each isolate has its own map) — enough
+// to stop password guessing during the demo without external state.
+const failedLogins = new Map<string, { fails: number; lockedUntil: number }>();
+const MAX_FAILS = 5;
+const LOCKOUT_MS = 60_000;
+
+export function login(username: string, password: string, ip = "local"): SessionUser | null {
+  const key = `${username.toLowerCase()}|${ip}`;
+  const rec = failedLogins.get(key);
+  if (rec && rec.lockedUntil > Date.now()) return null; // locked out
   const user = USERS.find((u) => u.userId === `u_${username.toLowerCase()}`);
-  if (!user || !verifyPassword(password, user.passwordHash)) return null;
+  if (!user || !verifyPassword(password, user.passwordHash)) {
+    const base = rec && rec.lockedUntil <= Date.now() ? 0 : rec?.fails ?? 0;
+    const fails = base + 1;
+    failedLogins.set(key, {
+      fails,
+      lockedUntil: fails >= MAX_FAILS ? Date.now() + LOCKOUT_MS : 0,
+    });
+    return null;
+  }
+  failedLogins.delete(key); // success clears the counter
   return { userId: user.userId, name: user.name, role: user.role };
 }
 
@@ -182,6 +206,13 @@ export function guard(
     } catch (e) {
       if (e instanceof HttpError) {
         return Response.json({ error: e.message }, { status: e.status });
+      }
+      // honest save failures (fixes-only #5): a failed write is never a 200
+      if (e instanceof DocTooLargeError) {
+        return Response.json({ error: e.message }, { status: 413 });
+      }
+      if (e instanceof SaveError) {
+        return Response.json({ error: e.message }, { status: 500 });
       }
       console.error(e);
       return Response.json({ error: "Internal error" }, { status: 500 });

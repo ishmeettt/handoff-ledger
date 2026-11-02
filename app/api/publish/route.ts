@@ -71,6 +71,11 @@ const handler = guard(["lead"], async (req: NextRequest, user) => {
         .filter(Boolean)
         .join(" · ") || "all claims reviewed"),
   });
+  // Fixes-only #5: full claim snapshots only for the LAST 5 versions (D1 row
+  // headroom). Older versions keep number/hash/time/note for the history.
+  for (const v of db.versions.slice(0, Math.max(0, db.versions.length - 5))) {
+    if (v.claims.length > 0) v.claims = [];
+  }
   appendAudit(
     db,
     user.name,

@@ -110,6 +110,16 @@ export default function ReviewBoard() {
           <div className="claim-head">
             <span className={`badge ${c.status}`}>{c.status}</span>
             <span className="claim-type">{c.type}</span>
+            {c.evidence.length > 0 && c.evidence.every((e: any) => e.quoteVerified) && (
+              <span
+                className="badge verified"
+                title={c.evidence.every((e: any) => e.matchType === "exact")
+                  ? "Every cited quote exists verbatim in its source"
+                  : "Every cited quote found (ignoring case/spacing)"}
+              >
+                quote found ✓
+              </span>
+            )}
             {c.extractedBy === "groq" && <span className="badge review">llm</span>}
             {c.extractedBy === "heuristic" && <span className="badge review">pattern</span>}
             <span className={`badge ${c.supported === "yes" ? "verified" : c.supported === "no" ? "conflicting" : "review"}`}>
@@ -118,6 +128,9 @@ export default function ReviewBoard() {
             <span className="badge review">{c.reviewState}</span>
             {c.reviewState === "accepted" && (
               <span className="badge verified" title="Reviewer confirmed this claim. Evidence status unchanged.">confirmed by reviewer</span>
+            )}
+            {c.reviewState === "edited" && (
+              <span className="badge review" title="Reviewer rewrote this claim; the new text was not re-checked against the quote">edited by reviewer</span>
             )}
             {c.conflictingWith?.length ? <span className="muted">conflicts with {c.conflictingWith.length} other claim(s)</span> : null}
           </div>

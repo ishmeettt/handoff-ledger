@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import WorkflowStepper from "@/components/WorkflowStepper";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -37,6 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <TopNav />
           </div>
+          <WorkflowStepper />
         </header>
         <main className="container">{children}</main>
         <footer className="footer">

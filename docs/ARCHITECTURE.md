@@ -71,8 +71,12 @@ Every component below exists to enforce one clause of that sentence.
 | ReviewAction | who did what to which claim, when, why — the audit trail |
 | HandoverVersion | immutable snapshot of approved claims at publish time |
 
-Store: JSON file (`data/db.json`) behind `lib/store.ts` — the shape matches the
-plan's Postgres target, so the Round 3 swap is mechanical.
+Store: `lib/store.ts` — one JSON document per workspace stored in **D1
+(SQLite)** on Cloudflare Workers, with a local JSON-file fallback when there is
+no Cloudflare context (plain `next dev`). Saves are size-gated before the
+write (413 near the row limit), failures surface as an honest 500 "Could not
+save" — never a silent success — and only the last 5 published versions keep
+full claim snapshots (older versions keep number/hash/time/note).
 
 ## The four statuses (never a confident guess)
 
@@ -96,10 +100,12 @@ not as a UI hide. `redactSecrets()` masks credential-shaped strings as a second
 layer even for roles that are allowed to see the source.
 
 Authentication (`lib/session.ts`): every API route requires a signed httpOnly
-session cookie (scrypt-hashed demo passwords, HMAC-signed payload). The role is
-read from the session — never from the URL or request body — and `actor` /
-`publishedBy` in the audit trail come from the session user, so actions cannot
-be forged by the client.
+session cookie (scrypt-hashed demo passwords, HMAC-signed payload, `Secure`
+flag in production). The role is read from the session — never from the URL or
+request body — and `actor` / `publishedBy` in the audit trail come from the
+session user, so actions cannot be forged by the client. Failed logins are
+rate-limited per username+IP (5 attempts → 60 s lockout, in-memory per
+isolate).
 
 ## AI extraction (Groq) and its safety gate
 

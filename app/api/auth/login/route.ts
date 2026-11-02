@@ -12,7 +12,12 @@ export async function POST(req: NextRequest) {
   if (typeof username !== "string" || typeof password !== "string") {
     return Response.json({ error: "username and password required" }, { status: 400 });
   }
-  const user = login(username, password);
+  // rate-limit key: username + caller IP (fixes-only #6)
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("cf-connecting-ip") ||
+    "local";
+  const user = login(username, password, ip);
   if (!user) {
     return Response.json({ error: "Invalid username or password." }, { status: 401 });
   }

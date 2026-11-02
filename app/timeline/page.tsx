@@ -6,7 +6,7 @@ import { api } from "@/lib/client";
 interface Ev {
   claimId: string; type: string; status: string; reviewState: string;
   text: string; sourceName: string; date: string | null;
-  yearInferred: boolean; dateEvidence: string | null;
+  yearInferred: boolean; upcoming: boolean; dateEvidence: string | null;
 }
 
 const TYPE_ICON: Record<string, string> = {
@@ -79,6 +79,16 @@ export default function TimelinePage() {
                   <span className={`badge ${e.status}`}>{e.status}</span>
                   <span className="claim-type">{e.type}</span>
                   <span className="badge review">{e.reviewState}</span>
+                  {e.date && e.yearInferred && (
+                    <span className="badge" title="The source gave no year — inferred from the reference date">
+                      year inferred
+                    </span>
+                  )}
+                  {e.upcoming && (
+                    <span className="badge" title="This date is after the source's reference date">
+                      (upcoming)
+                    </span>
+                  )}
                   <span className="muted" style={{ fontSize: "0.8rem" }}>↳ {e.sourceName}</span>
                 </div>
                 <div className="claim-text" style={{ marginBottom: 0 }}>{e.text}</div>

@@ -26,6 +26,22 @@ const EMPTY: DB = {
   extractedAt: null,
 };
 
+// ---------- save failure handling (fixes-only #5) ----------
+// saveDB never swallows an error: routes must not report success after a
+// failed write. The guard maps these to honest HTTP responses.
+export class SaveError extends Error {
+  constructor() {
+    super("Could not save. Try again.");
+  }
+}
+export class DocTooLargeError extends Error {
+  constructor() {
+    super("Document is too close to the storage limit — remove old imports or publish fewer snapshots.");
+  }
+}
+// D1 rows top out around 2 MB; leave headroom for key/encoding overhead.
+const MAX_DOC_CHARS = 1_500_000;
+
 // ---------- minimal structural types for D1 (no workers-types dependency) ----------
 interface D1Stmt {
   bind(...values: unknown[]): D1Stmt;
@@ -103,14 +119,34 @@ export async function getDB(): Promise<DB> {
 }
 
 export async function saveDB(db: DB): Promise<void> {
+  const json = JSON.stringify(db);
+  // size gate BEFORE the write: a near-limit document must fail loudly with
+  // 413, not corrupt a save halfway (fixes-only #5)
+  if (json.length > MAX_DOC_CHARS) throw new DocTooLargeError();
   const d1 = await getD1();
   if (d1) {
-    await ensureSchema(d1);
-    await putDoc(d1, db);
+    try {
+      await ensureSchema(d1);
+      await d1
+        .prepare(
+          "INSERT INTO kv (k, v) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET v = excluded.v"
+        )
+        .bind(KV_KEY, json)
+        .run();
+    } catch (e) {
+      if (e instanceof DocTooLargeError) throw e;
+      console.error("D1 save failed:", e);
+      throw new SaveError();
+    }
     return;
   }
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(DB_PATH, json);
+  } catch (e) {
+    console.error("file save failed:", e);
+    throw new SaveError();
+  }
 }
 
 export function appendAudit(db: DB, actor: string, action: string, detail: string) {

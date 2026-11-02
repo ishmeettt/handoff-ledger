@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/client";
 
 interface Src {
@@ -14,6 +15,7 @@ interface State {
   quotesFound: { found: number; total: number };
   supportCounts: Record<string, number>;
   audit: { id: string; at: string; actor: string; action: string; detail: string }[];
+  versions?: { version: number }[];
   isLead?: boolean;
   viewNote?: string;
 }
@@ -23,6 +25,12 @@ export default function Dashboard() {
   const [form, setForm] = useState({ name: "", kind: "meeting-notes", accessLevel: "internal", author: "", content: "", confirmedPermission: false });
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: "ok" | "err" | "warn"; text: string } | null>(null);
+  const [elapsed, setElapsed] = useState<number | null>(null); // live seconds while extracting
+  const [extractLog, setExtractLog] = useState<{
+    steps: { label: string; detail?: string; atMs: number }[];
+    durationMs: number;
+    summary: string;
+  } | null>(null);
 
   const load = useCallback(async () => {
     const { status, data } = await api<State>("/api/state");
@@ -76,19 +84,47 @@ export default function Dashboard() {
     load();
   }
 
+  async function runReset() {
+    if (!confirm("Reset the demo? This re-seeds the synthetic project, re-extracts claims (all unreviewed) and publishes a fresh baseline v1. Anything another visitor added will be removed.")) return;
+    setBusy("reset");
+    setMsg(null);
+    const { ok, data } = await api<any>("/api/reset", { method: "POST" });
+    setBusy(null);
+    if (!ok) return setMsg({ kind: "err", text: data.error ?? "Reset failed" });
+    setMsg({
+      kind: "ok",
+      text: `Demo restored: ${data.sources} sources, ${data.claims} claims (all pending review), baseline v${data.baselineVersion} published with ${data.baselineClaims} claims.`,
+    });
+    load();
+  }
+
   async function runExtract() {
     if (state && state.pendingUnreviewed > 0) {
-      if (!confirm("Re-running extraction replaces all claims and clears review decisions on them. Continue?")) return;
+      if (!confirm("Re-running extraction replaces all claims. Reviews on claims that still exist are KEPT; reviews on changed or removed claims are dropped. Continue?")) return;
     }
     setBusy("extract");
     setMsg(null);
+    setExtractLog(null);
+    setElapsed(0);
+    const iv = setInterval(() => setElapsed((e) => (e ?? 0) + 1), 1000);
     const { ok, data } = await api<any>("/api/extract", { method: "POST" });
+    clearInterval(iv);
+    setElapsed(null);
     setBusy(null);
     if (!ok) return setMsg({ kind: "err", text: data.error ?? "Extraction failed" });
-    const modes = (data.perSource ?? []).map((p: any) => `${p.name}: ${p.extractor}`).join("; ");
+    const secs = ((data.durationMs ?? 0) / 1000).toFixed(1);
+    setExtractLog({
+      steps: data.steps ?? [],
+      durationMs: data.durationMs ?? 0,
+      summary: data.extractorSummary ?? "unknown",
+    });
+    const keptNote =
+      data.reviewsKept !== undefined
+        ? ` ${data.reviewsKept} review(s) kept, ${data.newToReview} new to review, ${data.noLongerFound} no longer found.`
+        : "";
     setMsg({
       kind: data.errors?.length ? "warn" : "ok",
-      text: `Extracted ${data.count} claims — ${modes || "done"}. Now review them.`,
+      text: `Extracted ${data.count} claims in ${secs}s with: ${data.extractorSummary ?? "unknown"}.${keptNote} Now review them.`,
     });
     load();
   }
@@ -124,7 +160,43 @@ export default function Dashboard() {
           {msg.text}
         </div>
       )}
+      <div className="notice warn" role="status">
+        🧪 Shared demo with synthetic data — other visitors may change it.
+        {isLead && (
+          <button
+            className="ghost"
+            style={{ marginLeft: "0.8rem", padding: "0.2rem 0.7rem", fontSize: "0.85rem" }}
+            onClick={runReset}
+            disabled={busy !== null}
+          >
+            {busy === "reset" ? "Resetting…" : "Reset demo data"}
+          </button>
+        )}
+      </div>
       {state.viewNote && <div className="notice warn">{state.viewNote}</div>}
+
+      {/* One primary next step (fixes-only #11) */}
+      <div style={{ margin: "0 0 1.6rem" }}>
+        {isLead ? (
+          state.pendingUnreviewed > 0 ? (
+            <Link href="/review" className="btn" style={{ background: "var(--accent)", padding: "0.55rem 1.1rem", borderRadius: 7, display: "inline-block", fontWeight: 700 }}>
+              Review {state.pendingUnreviewed} claim{state.pendingUnreviewed === 1 ? "" : "s"} →
+            </Link>
+          ) : !(state.versions?.length) ? (
+            <Link href="/publish" className="btn" style={{ background: "var(--accent)", padding: "0.55rem 1.1rem", borderRadius: 7, display: "inline-block", fontWeight: 700 }}>
+              Publish the handover →
+            </Link>
+          ) : (
+            <Link href="/handover" className="btn" style={{ background: "var(--accent)", padding: "0.55rem 1.1rem", borderRadius: 7, display: "inline-block", fontWeight: 700 }}>
+              Open the handover plan →
+            </Link>
+          )
+        ) : (
+          <Link href="/handover" className="btn" style={{ background: "var(--accent)", padding: "0.55rem 1.1rem", borderRadius: 7, display: "inline-block", fontWeight: 700 }}>
+            Open your handover view →
+          </Link>
+        )}
+      </div>
 
       <h2>Sources ({state.sources.length})</h2>
       {state.sources.length === 0 ? (
@@ -150,9 +222,32 @@ export default function Dashboard() {
       {isLead && (
         <div className="row mt">
           <button onClick={runExtract} disabled={busy !== null || state.sources.length === 0}>
-            {busy === "extract" ? "Extracting…" : "Run extraction pipeline"}
+            {busy === "extract" ? `Extracting… ${elapsed ?? 0}s` : "Run extraction pipeline"}
           </button>
+          {busy === "extract" && (
+            <span className="muted" role="status">
+              reading sources → model extraction → quote checks → conflicts (rate-limited calls take 30–90s)
+            </span>
+          )}
           {state.extractedAt && <span className="muted mono">last extraction: {new Date(state.extractedAt).toLocaleString()}</span>}
+        </div>
+      )}
+
+      {isLead && extractLog && (
+        <div className="panel mt" aria-label="Extraction step log">
+          <div style={{ marginBottom: "0.5rem" }}>
+            <strong>Extracted with:</strong> {extractLog.summary}
+            {" · "}<span className="mono">{(extractLog.durationMs / 1000).toFixed(1)}s total</span>
+          </div>
+          <ol style={{ paddingLeft: "1.2rem", margin: 0, fontSize: "0.9rem" }}>
+            {extractLog.steps.map((s, i) => (
+              <li key={i} style={{ marginBottom: "0.25rem" }}>
+                <span className="mono muted">{(s.atMs / 1000).toFixed(1)}s</span>{" "}
+                {s.label}
+                {s.detail && <span className="muted"> — {s.detail}</span>}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
 
@@ -189,7 +284,7 @@ export default function Dashboard() {
               <input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} placeholder="who wrote this" maxLength={120} />
             </div>
             <div className="field">
-              <label>Content (max 1 MB text)</label>
+              <label>Content (max 200k–1 MB text, deployment-dependent)</label>
               <textarea value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} placeholder="Paste meeting notes, a chat export or a task board…" required />
             </div>
             <div className="field">

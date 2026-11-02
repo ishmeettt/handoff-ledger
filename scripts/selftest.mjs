@@ -112,9 +112,24 @@ async function main() {
 
   // ---------- B. every endpoint leak-scans for junior & successor ----------
   // reset + extract as lead first
+  const resetJunior = await req("/api/reset", { method: "POST", cookie: lee });
+  check("reset as junior -> 403", resetJunior.status === 403, `got ${resetJunior.status}`);
   const reset = await req("/api/reset", { method: "POST", cookie: lead });
   if (reset.status === 404) console.log("NOTE  reset endpoint disabled (ALLOW_RESET not set) — skipping reset-dependent checks below");
   const resetOk = reset.status === 200;
+  if (resetOk) {
+    // fixes-only #4: reset restores the full demo STORY
+    check(
+      "reset leaves every claim pending (unreviewed — Review is the next step)",
+      reset.data.claims > 0 && reset.data.pending === reset.data.claims,
+      `${reset.data.pending}/${reset.data.claims} pending`
+    );
+    check(
+      "reset publishes baseline v1 so role views work immediately",
+      reset.data.baselineVersion === 1 && reset.data.baselineClaims > 0,
+      `v${reset.data.baselineVersion} with ${reset.data.baselineClaims} claims`
+    );
+  }
 
   const ext = await req("/api/extract", { method: "POST", cookie: lead });
   check("lead can run extraction", ext.status === 200, ext.status === 200 ? `${ext.data.count} claims, modes: ${(ext.data.perSource ?? []).map((p) => p.extractor).join("/")}` : JSON.stringify(ext.data).slice(0, 120));
